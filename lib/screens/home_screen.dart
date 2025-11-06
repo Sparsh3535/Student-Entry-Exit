@@ -28,6 +28,11 @@ class _HomeScreenState extends State<HomeScreen> {
   // when an Android device is detected so you don't need to run adb manually.
   Timer? _adbTimer;
   bool _adbReverseDone = false;
+  String? _adbPath; // discovered or explicit adb executable path
+
+  // Simple adb watcher (wait-for-device -> run adb reverse)
+  Process? _adbWatcherProcess;
+  bool _adbWatcherRunning = false;
 
   // console logs
   final List<String> _logs = [];
@@ -59,7 +64,7 @@ class _HomeScreenState extends State<HomeScreen> {
   void initState() {
     super.initState();
     Future.microtask(_startServer);
-    _startAdbMonitor(); // begin polling for device + apply reverse automatically
+    _startAdbWatcher(); // simple watcher: wait-for-device then run reverse
   }
 
   @override
@@ -68,6 +73,7 @@ class _HomeScreenState extends State<HomeScreen> {
     _hScroll.dispose();
     _portController.dispose();
     _stopAdbMonitor();
+    _stopAdbWatcher();
     super.dispose();
   }
 
@@ -779,7 +785,7 @@ class _HomeScreenState extends State<HomeScreen> {
           icon: const Icon(Icons.menu),
           onPressed: () => _scaffoldKey.currentState?.openDrawer(),
         ),
-        title: const Text('Attendance Dashboard'),
+        title: const Text('Student Entry/Exit log'),
         actions: const [], // no top-right actions
       ),
       body: Padding(
@@ -795,9 +801,7 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   void _startAdbMonitor() {
-    // already done
     if (_adbReverseDone) return;
-
     // try immediately, then periodic attempts
     Future(() => _tryAdbReverse());
     _adbTimer ??= Timer.periodic(const Duration(seconds: 4), (_) {
@@ -814,35 +818,138 @@ class _HomeScreenState extends State<HomeScreen> {
     _adbTimer = null;
   }
 
-  Future<void> _tryAdbReverse() async {
+  Future<String?> _findAdbExecutable() async {
+    // if already discovered, reuse
+    if (_adbPath != null) return _adbPath;
+
     try {
-      // Check for adb and connected device(s)
-      final devices = await Process.run('adb', ['devices']);
-      final out = devices.stdout.toString();
-      if (!out.contains('\tdevice')) {
-        _log('ADB: no device detected');
+      // prefer system PATH lookup
+      final whereCmd = Platform.isWindows ? 'where' : 'which';
+      final which = await Process.run(whereCmd, ['adb'], runInShell: true).timeout(
+            const Duration(seconds: 2),
+            onTimeout: () => ProcessResult(0, 1, '', 'timeout'),
+          );
+      if (which.exitCode == 0) {
+        final out = which.stdout.toString().trim().split(RegExp(r'\r?\n')).first;
+        if (out.isNotEmpty) {
+          _adbPath = out;
+          _log('Found adb at $_adbPath (via $whereCmd)');
+          return _adbPath;
+        }
+      }
+    } catch (_) {}
+
+    // fallback: check common env vars (ANDROID_HOME / ANDROID_SDK_ROOT)
+    final envCandidates = <String?>[Platform.environment['ANDROID_HOME'], Platform.environment['ANDROID_SDK_ROOT']];
+    for (final base in envCandidates) {
+      if (base == null || base.isEmpty) continue;
+      final candidate = Platform.isWindows ? '$base\\platform-tools\\adb.exe' : '$base/platform-tools/adb';
+      final f = File(candidate);
+      if (await f.exists()) {
+        _adbPath = candidate;
+        _log('Found adb at $_adbPath (via env SDK path)');
+        return _adbPath;
+      }
+    }
+
+    _log('adb executable not found (ensure platform-tools in PATH or set ANDROID_SDK_ROOT/ANDROID_HOME)');
+    return null;
+  }
+
+  Future<void> _tryAdbReverse() async {
+    // don't run concurrently
+    if (_adbReverseDone) return;
+    _log('ADB monitor: looking for adb...');
+
+    final adb = await _findAdbExecutable();
+    if (adb == null) return;
+
+    try {
+      // start adb server
+      final start = await Process.run(adb, ['start-server'], runInShell: true).timeout(
+            const Duration(seconds: 3),
+            onTimeout: () => ProcessResult(0, 1, '', 'timeout'),
+          );
+      _log('adb start-server exit=${start.exitCode}');
+
+      // list devices with details
+      final devRes = await Process.run(adb, ['devices', '-l'], runInShell: true).timeout(
+            const Duration(seconds: 3),
+            onTimeout: () => ProcessResult(0, 1, '', 'timeout'),
+          );
+      final devOut = devRes.stdout.toString();
+      _log('adb devices output: ${devOut.replaceAll(RegExp(r'\r?\n'), ' | ')}');
+
+      // find lines that contain a connected "device"
+      final lines = devOut.split(RegExp(r'\r?\n')).map((l) => l.trim()).where((l) => l.isNotEmpty).toList();
+      final deviceLines = lines.where((l) => l.contains('\tdevice') || RegExp(r'\sdevice\s').hasMatch(l)).toList();
+      if (deviceLines.isEmpty) {
+        _log('ADB: no authorized device found');
         return;
       }
 
-      _log('ADB: device detected, attempting reverse tcp:$_port');
-      final rev = await Process.run('adb', [
-        'reverse',
-        'tcp:$_port',
-        'tcp:$_port',
-      ]);
-      if (rev.exitCode == 0) {
-        _adbReverseDone = true;
-        _log('ADB reverse succeeded for port $_port');
-        _stopAdbMonitor();
-      } else {
-        _log(
-          'ADB reverse failed (exit ${rev.exitCode}): ${rev.stdout}${rev.stderr}',
-        );
+      // attempt reverse per-device (use -s serial if available)
+      for (final line in deviceLines) {
+        final serialMatch = RegExp(r'^([^\s]+)').firstMatch(line);
+        final serial = serialMatch?.group(1);
+        final args = serial != null ? ['-s', serial, 'reverse', 'tcp:$_port', 'tcp:$_port'] : ['reverse', 'tcp:$_port', 'tcp:$_port'];
+        _log('Running: $adb ${args.join(' ')}');
+        final rev = await Process.run(adb, args, runInShell: true).timeout(
+              const Duration(seconds: 4),
+              onTimeout: () => ProcessResult(0, 1, '', 'timeout'),
+            );
+        _log('adb reverse exit=${rev.exitCode} stdout=${rev.stdout} stderr=${rev.stderr}');
+        if (rev.exitCode == 0) {
+          _adbReverseDone = true;
+          _log('ADB reverse succeeded for port $_port');
+          _stopAdbMonitor();
+          return;
+        }
       }
+
+      _log('ADB reverse attempts failed; will retry');
     } catch (e) {
-      // adb not found or other OS error
       _log('ADB check failed: $e');
     }
+  }
+
+  // Simple watcher that uses `adb wait-for-device` and runs `adb reverse` when a device appears.
+  // This is lightweight and runs in the background while the app is open.
+  void _startAdbWatcher() {
+    if (_adbWatcherRunning) return;
+    _adbWatcherRunning = true;
+
+    // fire-and-forget loop
+    Future(() async {
+      while (_adbWatcherRunning) {
+        try {
+          _log('ADB watcher: waiting for device (adb wait-for-device)...');
+          // start adb wait-for-device which blocks until a device becomes online
+          final proc = await Process.start('adb', ['wait-for-device'], runInShell: true);
+          _adbWatcherProcess = proc;
+          // wait until process exits (means device appeared)
+          final exit = await proc.exitCode;
+          if (!_adbWatcherRunning) break;
+          _log('ADB watcher: device detected (wait-for-device exit=$exit) — running reverse');
+
+          // run reverse for the configured port
+          final rev = await Process.run('adb', ['reverse', 'tcp:$_port', 'tcp:$_port'], runInShell: true);
+          _log('adb reverse exit=${rev.exitCode} stdout=${rev.stdout} stderr=${rev.stderr}');
+        } catch (e) {
+          _log('ADB watcher error: $e');
+        }
+        // small pause to avoid tight loop if adb returns immediately
+        await Future.delayed(const Duration(seconds: 2));
+      }
+    });
+  }
+
+  void _stopAdbWatcher() {
+    _adbWatcherRunning = false;
+    try {
+      _adbWatcherProcess?.kill();
+    } catch (_) {}
+    _adbWatcherProcess = null;
   }
 }
 // git push

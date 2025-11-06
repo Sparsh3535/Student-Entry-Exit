@@ -76,6 +76,8 @@ class _HomeScreenState extends State<HomeScreen> {
     _portController.dispose();
     _stopAdbMonitor();
     _stopAdbWatcher();
+    _dayRowsNotifier.dispose();
+    _leaveAppsNotifier.dispose();
     super.dispose();
   }
 
@@ -408,9 +410,7 @@ class _HomeScreenState extends State<HomeScreen> {
             InkWell(
               onTap: () {
                 Navigator.of(context).push(
-                  MaterialPageRoute(
-                    builder: (_) => DayScholarScreen(applicationsListenable: _dayRowsNotifier),
-                  ),
+                  MaterialPageRoute(builder: (_) => DayScholarScreen(applicationsListenable: _dayRowsNotifier)),
                 );
               },
               child: _dashCard('Day scholar', 'Open'),
@@ -558,8 +558,7 @@ class _HomeScreenState extends State<HomeScreen> {
                 Navigator.of(context).pop();
                 Navigator.of(context).push(
                   MaterialPageRoute(
-                    builder: (_) => DayScholarScreen(applicationsListenable: _dayRowsNotifier),
-                  ),
+                    builder: (_) => DayScholarScreen(applicationsListenable: _dayRowsNotifier)),
                 );
               },
             ),
@@ -1101,9 +1100,10 @@ class _HomeScreenState extends State<HomeScreen> {
 
   // per-table storage (hostel/day/leave)
   final List<Map<String, dynamic>> _dayRows = [];
+  // leave applications storage + notifier (fixes missing _leaveApps getter error)
   final List<Map<String, dynamic>> _leaveApps = [];
-
-  // notifier for real-time updates to DayScholar screen
+  final ValueNotifier<List<Map<String, dynamic>>> _leaveAppsNotifier = ValueNotifier(const []);
+  // notifier for real-time DayScholar updates
   final ValueNotifier<List<Map<String, dynamic>>> _dayRowsNotifier = ValueNotifier(const []);
 
   // Insert/update day-scholar rows:
@@ -1127,21 +1127,20 @@ class _HomeScreenState extends State<HomeScreen> {
         final now = _shortDateTime(DateTime.now());
 
         if (prevIn.trim().isEmpty) {
-          // first event -> set intime
           setState(() {
             r['intime'] = now;
             target[i] = Map<String, dynamic>.from(r);
             _log('DayScholar: set intime to $now for id=${id ?? phone ?? name}');
           });
+          _dayRowsNotifier.value = List<Map<String, dynamic>>.from(_dayRows);
         } else if (prevOut.trim().isEmpty) {
-          // intime exists and outtime empty -> set outtime
           setState(() {
             r['outtime'] = now;
             target[i] = Map<String, dynamic>.from(r);
             _log('DayScholar: set outtime to $now for id=${id ?? phone ?? name}');
           });
+          _dayRowsNotifier.value = List<Map<String, dynamic>>.from(_dayRows);
         } else {
-          // both intime+outtime present -> start a new session with new intime
           final newRow = <String, dynamic>{
             'name': r['name'],
             'id': r['id'],
@@ -1155,12 +1154,12 @@ class _HomeScreenState extends State<HomeScreen> {
             target.add(newRow);
             _log('DayScholar: started new session (intime=$now) for id=${id ?? phone ?? name}');
           });
+          _dayRowsNotifier.value = List<Map<String, dynamic>>.from(_dayRows);
         }
         return;
       }
     }
 
-    // not found -> add with intime set
     final normalized = <String, dynamic>{
       'name': name,
       'id': id,
@@ -1174,7 +1173,6 @@ class _HomeScreenState extends State<HomeScreen> {
       target.add(normalized);
       _log('DayScholar: added new entry for id=${id ?? phone ?? name}');
     });
-    // notify listeners with a defensive copy
     _dayRowsNotifier.value = List<Map<String, dynamic>>.from(_dayRows);
   }
 

@@ -409,7 +409,7 @@ class _HomeScreenState extends State<HomeScreen> {
               onTap: () {
                 Navigator.of(context).push(
                   MaterialPageRoute(
-                    builder: (_) => DayScholarScreen(applications: _dayRows),
+                    builder: (_) => DayScholarScreen(applicationsListenable: _dayRowsNotifier),
                   ),
                 );
               },
@@ -558,7 +558,7 @@ class _HomeScreenState extends State<HomeScreen> {
                 Navigator.of(context).pop();
                 Navigator.of(context).push(
                   MaterialPageRoute(
-                    builder: (_) => DayScholarScreen(applications: _dayRows),
+                    builder: (_) => DayScholarScreen(applicationsListenable: _dayRowsNotifier),
                   ),
                 );
               },
@@ -1099,11 +1099,12 @@ class _HomeScreenState extends State<HomeScreen> {
     return false;
   }
 
-  // per-table storage
+  // per-table storage (hostel/day/leave)
+  final List<Map<String, dynamic>> _dayRows = [];
   final List<Map<String, dynamic>> _leaveApps = [];
 
-  // per-table storage for day scholar (kept here so only home_screen.dart changes)
-  final List<Map<String, dynamic>> _dayRows = [];
+  // notifier for real-time updates to DayScholar screen
+  final ValueNotifier<List<Map<String, dynamic>>> _dayRowsNotifier = ValueNotifier(const []);
 
   // Insert/update day-scholar rows:
   // - first scan for a person -> set 'intime'
@@ -1173,6 +1174,8 @@ class _HomeScreenState extends State<HomeScreen> {
       target.add(normalized);
       _log('DayScholar: added new entry for id=${id ?? phone ?? name}');
     });
+    // notify listeners with a defensive copy
+    _dayRowsNotifier.value = List<Map<String, dynamic>>.from(_dayRows);
   }
 
   // Try to parse leave application from String or Map. Returns normalized map or null.

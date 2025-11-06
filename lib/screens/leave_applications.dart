@@ -17,16 +17,21 @@ class LeaveApplicationsScreen extends StatelessWidget {
   bool _isLeave(Map<String, dynamic> a) {
     final type = _first(a, ['type', 'Type']).toLowerCase();
     if (type.contains('leave')) return true;
-    final hasLeaving = a.keys.any((k) => k.toString().toLowerCase().contains('leaving'));
-    final hasReturning = a.keys.any((k) => k.toString().toLowerCase().contains('returning'));
+    final hasLeaving = a.keys.any(
+      (k) => k.toString().toLowerCase().contains('leaving'),
+    );
+    final hasReturning = a.keys.any(
+      (k) => k.toString().toLowerCase().contains('returning'),
+    );
     return hasLeaving || hasReturning;
   }
 
   String _formatDateTime(String? s) {
     if (s == null) return '';
     final re = RegExp(
-        r'(\d{1,2}[\/\-]\d{1,2}[\/\-]\d{4})\s*(?:at\s*)?(\d{1,2}:\d{2})?',
-        caseSensitive: false);
+      r'(\d{1,2}[\/\-]\d{1,2}[\/\-]\d{4})\s*(?:at\s*)?(\d{1,2}:\d{2})?',
+      caseSensitive: false,
+    );
     final m = re.firstMatch(s);
     if (m != null) {
       final date = m.group(1)!;
@@ -48,7 +53,7 @@ class LeaveApplicationsScreen extends StatelessWidget {
       'Returning',
       'Duration',
       'Address',
-      'Received'
+      'Received',
     ];
 
     return Scaffold(
@@ -67,29 +72,68 @@ class LeaveApplicationsScreen extends StatelessWidget {
                       headingRowHeight: 56,
                       dataRowHeight: 56,
                       columns: columns
-                          .map((c) => DataColumn(
-                              label: Text(c, style: const TextStyle(fontWeight: FontWeight.w600))))
+                          .map(
+                            (c) => DataColumn(
+                              label: Text(
+                                c,
+                                style: const TextStyle(
+                                  fontWeight: FontWeight.w600,
+                                ),
+                              ),
+                            ),
+                          )
                           .toList(),
                       rows: leaves.map((a) {
-                        final name = _first(a, ['name', 'Name', 'full name', 'fullname']);
-                        final roll = _first(a, ['roll number', 'Roll Number', 'roll', 'id', 'Id']);
-                        final phone = _first(a, ['phone number', 'Phone Number', 'phone', 'mobile']);
-                        final leaving = _formatDateTime(_first(a, ['leaving', 'Leaving', 'from']));
-                        final returning = _formatDateTime(_first(a, ['returning', 'Returning', 'to']));
-                        final duration = _first(a, ['duration', 'Duration']);
-                        final address = _first(a, ['address', 'Address', 'location', 'Location']);
-                        final received = _first(a, ['receivedAt', 'received_at', 'received']);
-
-                        return DataRow(cells: [
-                          DataCell(SelectableText(name)),
-                          DataCell(SelectableText(roll)),
-                          DataCell(SelectableText(phone)),
-                          DataCell(SelectableText(leaving)),
-                          DataCell(SelectableText(returning)),
-                          DataCell(SelectableText(duration)),
-                          DataCell(SelectableText(address)),
-                          DataCell(SelectableText(received)),
+                        final name = _first(a, [
+                          'name',
+                          'Name',
+                          'full name',
+                          'fullname',
                         ]);
+                        final roll = _first(a, [
+                          'roll number',
+                          'Roll Number',
+                          'roll',
+                          'id',
+                          'Id',
+                        ]);
+                        final phone = _first(a, [
+                          'phone number',
+                          'Phone Number',
+                          'phone',
+                          'mobile',
+                        ]);
+                        final leaving = _formatDateTime(
+                          _first(a, ['leaving', 'Leaving', 'from']),
+                        );
+                        final returning = _formatDateTime(
+                          _first(a, ['returning', 'Returning', 'to']),
+                        );
+                        final duration = _first(a, ['duration', 'Duration']);
+                        final address = _first(a, [
+                          'address',
+                          'Address',
+                          'location',
+                          'Location',
+                        ]);
+                        final received = _first(a, [
+                          'receivedAt',
+                          'received_at',
+                          'received',
+                        ]);
+
+                        return DataRow(
+                          cells: [
+                            DataCell(SelectableText(name)),
+                            DataCell(SelectableText(roll)),
+                            DataCell(SelectableText(phone)),
+                            DataCell(SelectableText(leaving)),
+                            DataCell(SelectableText(returning)),
+                            DataCell(SelectableText(duration)),
+                            DataCell(SelectableText(address)),
+                            DataCell(SelectableText(received)),
+                          ],
+                        );
                       }).toList(),
                     ),
                   ),

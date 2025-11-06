@@ -408,7 +408,9 @@ class _HomeScreenState extends State<HomeScreen> {
             InkWell(
               onTap: () {
                 Navigator.of(context).push(
-                  MaterialPageRoute(builder: (_) => DayScholarScreen(applications: _dayRows)),
+                  MaterialPageRoute(
+                    builder: (_) => DayScholarScreen(applications: _dayRows),
+                  ),
                 );
               },
               child: _dashCard('Day scholar', 'Open'),
@@ -419,7 +421,8 @@ class _HomeScreenState extends State<HomeScreen> {
               onTap: () {
                 Navigator.of(context).push(
                   MaterialPageRoute(
-                    builder: (_) => LeaveApplicationsScreen(applications: _leaveApps),
+                    builder: (_) =>
+                        LeaveApplicationsScreen(applications: _leaveApps),
                   ),
                 );
               },
@@ -523,7 +526,8 @@ class _HomeScreenState extends State<HomeScreen> {
                 Navigator.of(context).pop();
                 Navigator.of(context).push(
                   MaterialPageRoute(
-                    builder: (_) => LeaveApplicationsScreen(applications: _leaveApps),
+                    builder: (_) =>
+                        LeaveApplicationsScreen(applications: _leaveApps),
                   ),
                 );
               },
@@ -553,7 +557,9 @@ class _HomeScreenState extends State<HomeScreen> {
               onTap: () {
                 Navigator.of(context).pop();
                 Navigator.of(context).push(
-                  MaterialPageRoute(builder: (_) => DayScholarScreen(applications: _dayRows)),
+                  MaterialPageRoute(
+                    builder: (_) => DayScholarScreen(applications: _dayRows),
+                  ),
                 );
               },
             ),
@@ -1086,7 +1092,7 @@ class _HomeScreenState extends State<HomeScreen> {
         'phone': phone,
         'location': location,
       };
-      _insertOrUpdateRow(_dayRows, minimal);
+      _insertOrUpdateDayRow(_dayRows, minimal);
       return true;
     }
 
@@ -1094,39 +1100,107 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   // per-table storage
-  final List<Map<String, dynamic>> _dayRows = [];
   final List<Map<String, dynamic>> _leaveApps = [];
 
-  // Try to parse a leave-application block (String or Map).
-  // Returns normalized map or null if not a leave application.
+  // per-table storage for day scholar (kept here so only home_screen.dart changes)
+  final List<Map<String, dynamic>> _dayRows = [];
+
+  // Insert/update day-scholar rows:
+  // - first scan for a person -> set 'intime'
+  // - next scan for same person -> set 'outtime'
+  // - if both already present, start a new session (new row with intime)
+  void _insertOrUpdateDayRow(List<Map<String, dynamic>> target, Map<String, dynamic> fields) {
+    final String? name = fields['name'] as String?;
+    final String? id = fields['id'] as String?;
+    final String? phone = fields['phone'] as String?;
+
+    for (var i = target.length - 1; i >= 0; i--) {
+      final r = target[i];
+      final sameById = id != null && r['id'] != null && r['id'].toString() == id;
+      final sameByPhone = (id == null || !sameById) && phone != null && r['phone'] != null && r['phone'].toString() == phone;
+      final sameByName = (id == null && phone == null) && name != null && r['name'] != null && r['name'].toString() == name;
+
+      if (sameById || sameByPhone || sameByName) {
+        final prevIn = (r['intime'] as String?) ?? '';
+        final prevOut = (r['outtime'] as String?) ?? '';
+        final now = _shortDateTime(DateTime.now());
+
+        if (prevIn.trim().isEmpty) {
+          // first event -> set intime
+          setState(() {
+            r['intime'] = now;
+            target[i] = Map<String, dynamic>.from(r);
+            _log('DayScholar: set intime to $now for id=${id ?? phone ?? name}');
+          });
+        } else if (prevOut.trim().isEmpty) {
+          // intime exists and outtime empty -> set outtime
+          setState(() {
+            r['outtime'] = now;
+            target[i] = Map<String, dynamic>.from(r);
+            _log('DayScholar: set outtime to $now for id=${id ?? phone ?? name}');
+          });
+        } else {
+          // both intime+outtime present -> start a new session with new intime
+          final newRow = <String, dynamic>{
+            'name': r['name'],
+            'id': r['id'],
+            'phone': r['phone'],
+            'location': r['location'],
+            'intime': now,
+            'outtime': null,
+            'security': null,
+          };
+          setState(() {
+            target.add(newRow);
+            _log('DayScholar: started new session (intime=$now) for id=${id ?? phone ?? name}');
+          });
+        }
+        return;
+      }
+    }
+
+    // not found -> add with intime set
+    final normalized = <String, dynamic>{
+      'name': name,
+      'id': id,
+      'phone': phone,
+      'location': fields['location'],
+      'intime': _shortDateTime(DateTime.now()),
+      'outtime': null,
+      'security': null,
+    };
+    setState(() {
+      target.add(normalized);
+      _log('DayScholar: added new entry for id=${id ?? phone ?? name}');
+    });
+  }
+
+  // Try to parse leave application from String or Map. Returns normalized map or null.
   Map<String, dynamic>? _tryParseLeaveApplication(dynamic src) {
     if (src == null) return null;
     String? s;
-    if (src is String) s = src;
-    if (src is Map) {
-      // lowercase map keys for easy lookup
+    if (src is String) {
+      s = src;
+    } else if (src is Map) {
+      // lowercase keys
       final low = <String, String>{};
-      src.forEach(
-        (k, v) => low[k.toString().toLowerCase()] = v?.toString() ?? '',
-      );
-      if ((low['type'] ?? '').toLowerCase().contains('leave') ||
-          low.containsKey('leaving') ||
-          low.containsKey('returning')) {
+      src.forEach((k, v) => low[k.toString().toLowerCase()] = v?.toString() ?? '');
+      if ((low['type'] ?? '').toLowerCase().contains('leave') || low.containsKey('leaving') || low.containsKey('returning')) {
         return {
           'type': 'Leave',
-          'name': low['name'],
-          'id': low['roll number'] ?? low['roll'] ?? low['id'],
-          'phone': low['phone number'] ?? low['phone'],
-          'leaving': low['leaving'],
-          'returning': low['returning'],
-          'duration': low['duration'],
-          'address': low['address'],
+          'name': low['name'] ?? '',
+          'id': low['roll number'] ?? low['roll'] ?? low['id'] ?? '',
+          'phone': low['phone number'] ?? low['phone'] ?? '',
+          'leaving': low['leaving'] ?? '',
+          'returning': low['returning'] ?? '',
+          'duration': low['duration'] ?? '',
+          'address': low['address'] ?? '',
           'receivedAt': _shortDateTime(DateTime.now()),
         };
       }
-      if (src.containsKey('value') && src['value'] is String)
-        s = src['value'] as String;
+      if (src.containsKey('value') && src['value'] is String) s = src['value'] as String;
     }
+
     if (s == null) return null;
 
     final map = <String, String>{};
@@ -1136,59 +1210,42 @@ class _HomeScreenState extends State<HomeScreen> {
     }
     if (map.isEmpty) return null;
 
-    final type = map['type'];
-    if ((type != null && type.toLowerCase().contains('leave')) ||
-        map.containsKey('leaving') ||
-        map.containsKey('returning')) {
+    final type = map['type'] ?? '';
+    if (type.toLowerCase().contains('leave') || map.containsKey('leaving') || map.containsKey('returning')) {
       return {
         'type': 'Leave',
-        'name': map['name'],
-        'id': map['roll number'] ?? map['roll'] ?? map['id'],
-        'phone': map['phone number'] ?? map['phone'],
-        'leaving': map['leaving'],
-        'returning': map['returning'],
-        'duration': map['duration'],
-        'address': map['address'],
+        'name': map['name'] ?? '',
+        'id': map['roll number'] ?? map['roll'] ?? map['id'] ?? '',
+        'phone': map['phone number'] ?? map['phone'] ?? '',
+        'leaving': map['leaving'] ?? '',
+        'returning': map['returning'] ?? '',
+        'duration': map['duration'] ?? '',
+        'address': map['address'] ?? '',
         'receivedAt': _shortDateTime(DateTime.now()),
       };
     }
     return null;
   }
 
-  // Insert or update a row in the given target list (dedupe by id -> phone -> name).
-  void _insertOrUpdateRow(
-    List<Map<String, dynamic>> target,
-    Map<String, dynamic> fields,
-  ) {
-    final String? name = fields['name'] as String?;
-    final String? id = fields['id'] as String?;
-    final String? phone = fields['phone'] as String?;
+  // Insert or update into target list (dedupe by id -> phone -> name).
+  void _insertOrUpdateRow(List<Map<String, dynamic>> target, Map<String, dynamic> fields) {
+    final name = fields['name'] as String?;
+    final id = fields['id'] as String?;
+    final phone = fields['phone'] as String?;
 
     for (var i = target.length - 1; i >= 0; i--) {
       final r = target[i];
-      final sameById =
-          id != null && r['id'] != null && r['id'].toString() == id;
-      final sameByPhone =
-          (id == null || !sameById) &&
-          phone != null &&
-          r['phone'] != null &&
-          r['phone'].toString() == phone;
-      final sameByName =
-          (id == null && phone == null) &&
-          name != null &&
-          r['name'] != null &&
-          r['name'].toString() == name;
-
+      final sameById = id != null && r['id'] != null && r['id'].toString() == id;
+      final sameByPhone = (id == null || !sameById) && phone != null && r['phone'] != null && r['phone'].toString() == phone;
+      final sameByName = (id == null && phone == null) && name != null && r['name'] != null && r['name'].toString() == name;
       if (sameById || sameByPhone || sameByName) {
         final prevIn = r['intime'] as String?;
-        if (prevIn == null || prevIn.trim().isEmpty) {
+        if (prevIn == null || prevIn.toString().trim().isEmpty) {
           final now = _shortDateTime(DateTime.now());
           setState(() {
             r['intime'] = now;
             target[i] = Map<String, dynamic>.from(r);
-            _log(
-              'Updated existing row intime to $now for id=${id ?? phone ?? name}',
-            );
+            _log('Updated existing row intime to $now for id=${id ?? phone ?? name}');
           });
         }
         return;

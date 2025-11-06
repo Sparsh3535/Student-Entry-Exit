@@ -270,140 +270,32 @@ class _HomeScreenState extends State<HomeScreen> {
   void _addRowFromDynamic(dynamic obj) {
     Map<String, dynamic> raw;
     if (obj is Map<String, dynamic>) {
-      raw = obj;
+      raw = Map<String, dynamic>.from(obj);
     } else {
       raw = {'value': obj?.toString()};
     }
 
-    String? name = _firstString(raw, [
-      'name',
-      'Name',
-      'fullName',
-      'fullname',
-      'username',
-    ]);
-    String? id = _firstString(raw, [
-      'id',
-      'Id',
-      'roll',
-      'roll_no',
-      'rollno',
-      'rollNo',
-    ]);
-    String? phone = _firstString(raw, [
-      'phone',
-      'phone_number',
-      'phoneNumber',
-      'mobile',
-      'mobile_number',
-    ]);
-    String? location = _firstString(raw, ['location', 'place', 'address']);
-
-    // If incoming payload is a single string like:
-    // "Name: snehashish, Roll Number: 23ece1031, Phone Number: 8830147718, Location: cuncolim"
-    final valueField = raw['value'];
-    if (valueField is String) {
-      final s = valueField;
-
-      String? extract(RegExp re) {
-        final m = re.firstMatch(s);
-        if (m == null) return null;
-        return m.group(1)?.trim().replaceAll(RegExp(r'[,\.\s]+$'), '');
-      }
-
-      // common patterns (case-insensitive)
-      name ??= extract(RegExp(r'Name\s*:\s*([^,\.]+)', caseSensitive: false));
-      id ??= extract(
-        RegExp(
-          r'(?:Roll(?:\s*Number)?|RollNo|Roll_No|ID|Id)\s*:\s*([^,\.]+)',
-          caseSensitive: false,
-        ),
-      );
-      phone ??= extract(
-        RegExp(
-          r'(?:(?:Phone|Mobile)(?:\s*Number)?)\s*:\s*([^,\.]+)',
-          caseSensitive: false,
-        ),
-      );
-      location ??= extract(
-        RegExp(r'Location\s*:\s*([^,\.]+)', caseSensitive: false),
-      );
-
-      // fallback: try picking tokens separated by commas with key:value pairs
-      if (name == null || id == null || phone == null || location == null) {
-        final parts = s.split(',').map((p) => p.trim()).toList();
-        for (final p in parts) {
-          if (name == null) {
-            final m = RegExp(
-              r'^(?:Name)\s*:\s*(.+)$',
-              caseSensitive: false,
-            ).firstMatch(p);
-            if (m != null) name = m.group(1)?.trim();
-          }
-          if (id == null) {
-            final m = RegExp(
-              r'^(?:Roll(?:\s*Number)?|ID)\s*:\s*(.+)$',
-              caseSensitive: false,
-            ).firstMatch(p);
-            if (m != null) id = m.group(1)?.trim();
-          }
-          if (phone == null) {
-            final m = RegExp(
-              r'^(?:Phone(?:\s*Number)?|Mobile)\s*:\s*(.+)$',
-              caseSensitive: false,
-            ).firstMatch(p);
-            if (m != null) phone = m.group(1)?.trim();
-          }
-          if (location == null) {
-            final m = RegExp(
-              r'^(?:Location)\s*:\s*(.+)$',
-              caseSensitive: false,
-            ).firstMatch(p);
-            if (m != null) location = m.group(1)?.trim();
-          }
-        }
-      }
+    // If value contains key:value block, parse and merge into raw
+    final kvFromValue = _parseKeyValueBlock(raw['value'] ?? raw);
+    if (kvFromValue.isNotEmpty) {
+      kvFromValue.forEach((k, v) {
+        // prefer existing explicit keys in raw; otherwise inject parsed value
+        if (!raw.containsKey(k) || raw[k] == null || raw[k].toString().trim().isEmpty) raw[k] = v;
+        // also add a capitalized variants to help older lookups
+        final cap = _capitalizedKey(k);
+        if (!raw.containsKey(cap) || raw[cap] == null || raw[cap].toString().trim().isEmpty) raw[cap] = v;
+      });
     }
 
-    // Find last matching existing row (by id, then phone, then name)
-    for (var i = _rows.length - 1; i >= 0; i--) {
-      final r = _rows[i];
-      final sameById =
-          id != null && r['id'] != null && r['id'].toString() == id;
-      final sameByPhone =
-          (id == null || !sameById) &&
-          phone != null &&
-          r['phone'] != null &&
-          r['phone'].toString() == phone;
-      final sameByName =
-          (id == null && phone == null) &&
-          name != null &&
-          r['name'] != null &&
-          r['name'].toString() == name;
+    // If this data has a Type and it routes to leave/day/hostel, let routing handle it.
+    if (_routeByType(raw)) return;
 
-      if (sameById || sameByPhone || sameByName) {
-        // Update existing row: only modify the 'intime' column (do NOT add a new row)
-        // If intime is empty/null, set it to the current time (scan time) — do NOT add a new row.
-        final prevIn = r['intime'] as String?;
-        if (prevIn == null || prevIn.toString().trim().isEmpty) {
-          final now = _shortDateTime(DateTime.now());
-          setState(() {
-            r['intime'] = now;
-            _rows[i] = Map<String, dynamic>.from(r);
-            _log(
-              'Updated existing row intime to $now for id=${id ?? phone ?? name}',
-            );
-          });
-        } else {
-          _log(
-            'Duplicate scan received but intime already set — no new row created',
-          );
-        }
-        return; // done, do not add a new row
-      }
-    }
+    // Build normalized row preferring parsed kv values then map keys
+    final name = _firstString(raw, ['name', 'Name', 'fullName', 'fullname', 'username']) ?? kvFromValue['name'] ?? '';
+    final id = _firstString(raw, ['id', 'Id', 'roll', 'roll_no', 'rollno', 'Roll Number', 'roll number']) ?? kvFromValue['roll number'] ?? kvFromValue['roll'] ?? '';
+    final phone = _firstString(raw, ['phone', 'Phone', 'mobile', 'Phone Number', 'phone number']) ?? kvFromValue['phone number'] ?? kvFromValue['phone'] ?? '';
+    final location = _firstString(raw, ['location', 'Location', 'address']) ?? kvFromValue['location'] ?? '';
 
-    // No existing match — create a new entry as before
     final normalized = <String, dynamic>{
       'name': name,
       'id': id,
@@ -414,9 +306,13 @@ class _HomeScreenState extends State<HomeScreen> {
       'security': null,
     };
 
-    setState(() {
-      _rows.add(normalized);
-    });
+    setState(() => _rows.add(normalized));
+  }
+
+  String _capitalizedKey(String k) {
+    if (k.isEmpty) return k;
+    final parts = k.split(RegExp(r'\s+'));
+    return parts.map((p) => p.isEmpty ? p : (p[0].toUpperCase() + p.substring(1))).join(' ');
   }
 
   String? _firstString(Map<String, dynamic> m, List<String> keys) {
@@ -480,7 +376,9 @@ class _HomeScreenState extends State<HomeScreen> {
             InkWell(
               onTap: () {
                 Navigator.of(context).push(
-                  MaterialPageRoute(builder: (_) => const LeaveApplicationsScreen()),
+                  MaterialPageRoute(
+                    builder: (_) => const LeaveApplicationsScreen(),
+                  ),
                 );
               },
               child: _dashCard('Leave Applications', 'Open'),
@@ -582,7 +480,9 @@ class _HomeScreenState extends State<HomeScreen> {
               onTap: () {
                 Navigator.of(context).pop();
                 Navigator.of(context).push(
-                  MaterialPageRoute(builder: (_) => const LeaveApplicationsScreen()),
+                  MaterialPageRoute(
+                    builder: (_) => const LeaveApplicationsScreen(),
+                  ),
                 );
               },
             ),
@@ -881,12 +781,17 @@ class _HomeScreenState extends State<HomeScreen> {
     try {
       // prefer system PATH lookup
       final whereCmd = Platform.isWindows ? 'where' : 'which';
-      final which = await Process.run(whereCmd, ['adb'], runInShell: true).timeout(
+      final which = await Process.run(whereCmd, ['adb'], runInShell: true)
+          .timeout(
             const Duration(seconds: 2),
             onTimeout: () => ProcessResult(0, 1, '', 'timeout'),
           );
       if (which.exitCode == 0) {
-        final out = which.stdout.toString().trim().split(RegExp(r'\r?\n')).first;
+        final out = which.stdout
+            .toString()
+            .trim()
+            .split(RegExp(r'\r?\n'))
+            .first;
         if (out.isNotEmpty) {
           _adbPath = out;
           _log('Found adb at $_adbPath (via $whereCmd)');
@@ -896,10 +801,15 @@ class _HomeScreenState extends State<HomeScreen> {
     } catch (_) {}
 
     // fallback: check common env vars (ANDROID_HOME / ANDROID_SDK_ROOT)
-    final envCandidates = <String?>[Platform.environment['ANDROID_HOME'], Platform.environment['ANDROID_SDK_ROOT']];
+    final envCandidates = <String?>[
+      Platform.environment['ANDROID_HOME'],
+      Platform.environment['ANDROID_SDK_ROOT'],
+    ];
     for (final base in envCandidates) {
       if (base == null || base.isEmpty) continue;
-      final candidate = Platform.isWindows ? '$base\\platform-tools\\adb.exe' : '$base/platform-tools/adb';
+      final candidate = Platform.isWindows
+          ? '$base\\platform-tools\\adb.exe'
+          : '$base/platform-tools/adb';
       final f = File(candidate);
       if (await f.exists()) {
         _adbPath = candidate;
@@ -908,7 +818,9 @@ class _HomeScreenState extends State<HomeScreen> {
       }
     }
 
-    _log('adb executable not found (ensure platform-tools in PATH or set ANDROID_SDK_ROOT/ANDROID_HOME)');
+    _log(
+      'adb executable not found (ensure platform-tools in PATH or set ANDROID_SDK_ROOT/ANDROID_HOME)',
+    );
     return null;
   }
 
@@ -922,14 +834,16 @@ class _HomeScreenState extends State<HomeScreen> {
 
     try {
       // start adb server
-      final start = await Process.run(adb, ['start-server'], runInShell: true).timeout(
+      final start = await Process.run(adb, ['start-server'], runInShell: true)
+          .timeout(
             const Duration(seconds: 3),
             onTimeout: () => ProcessResult(0, 1, '', 'timeout'),
           );
       _log('adb start-server exit=${start.exitCode}');
 
       // list devices with details
-      final devRes = await Process.run(adb, ['devices', '-l'], runInShell: true).timeout(
+      final devRes = await Process.run(adb, ['devices', '-l'], runInShell: true)
+          .timeout(
             const Duration(seconds: 3),
             onTimeout: () => ProcessResult(0, 1, '', 'timeout'),
           );
@@ -937,8 +851,16 @@ class _HomeScreenState extends State<HomeScreen> {
       _log('adb devices output: ${devOut.replaceAll(RegExp(r'\r?\n'), ' | ')}');
 
       // find lines that contain a connected "device"
-      final lines = devOut.split(RegExp(r'\r?\n')).map((l) => l.trim()).where((l) => l.isNotEmpty).toList();
-      final deviceLines = lines.where((l) => l.contains('\tdevice') || RegExp(r'\sdevice\s').hasMatch(l)).toList();
+      final lines = devOut
+          .split(RegExp(r'\r?\n'))
+          .map((l) => l.trim())
+          .where((l) => l.isNotEmpty)
+          .toList();
+      final deviceLines = lines
+          .where(
+            (l) => l.contains('\tdevice') || RegExp(r'\sdevice\s').hasMatch(l),
+          )
+          .toList();
       if (deviceLines.isEmpty) {
         _log('ADB: no authorized device found');
         return;
@@ -948,13 +870,17 @@ class _HomeScreenState extends State<HomeScreen> {
       for (final line in deviceLines) {
         final serialMatch = RegExp(r'^([^\s]+)').firstMatch(line);
         final serial = serialMatch?.group(1);
-        final args = serial != null ? ['-s', serial, 'reverse', 'tcp:$_port', 'tcp:$_port'] : ['reverse', 'tcp:$_port', 'tcp:$_port'];
+        final args = serial != null
+            ? ['-s', serial, 'reverse', 'tcp:$_port', 'tcp:$_port']
+            : ['reverse', 'tcp:$_port', 'tcp:$_port'];
         _log('Running: $adb ${args.join(' ')}');
         final rev = await Process.run(adb, args, runInShell: true).timeout(
-              const Duration(seconds: 4),
-              onTimeout: () => ProcessResult(0, 1, '', 'timeout'),
-            );
-        _log('adb reverse exit=${rev.exitCode} stdout=${rev.stdout} stderr=${rev.stderr}');
+          const Duration(seconds: 4),
+          onTimeout: () => ProcessResult(0, 1, '', 'timeout'),
+        );
+        _log(
+          'adb reverse exit=${rev.exitCode} stdout=${rev.stdout} stderr=${rev.stderr}',
+        );
         if (rev.exitCode == 0) {
           _adbReverseDone = true;
           _log('ADB reverse succeeded for port $_port');
@@ -981,16 +907,26 @@ class _HomeScreenState extends State<HomeScreen> {
         try {
           _log('ADB watcher: waiting for device (adb wait-for-device)...');
           // start adb wait-for-device which blocks until a device becomes online
-          final proc = await Process.start('adb', ['wait-for-device'], runInShell: true);
+          final proc = await Process.start('adb', [
+            'wait-for-device',
+          ], runInShell: true);
           _adbWatcherProcess = proc;
           // wait until process exits (means device appeared)
           final exit = await proc.exitCode;
           if (!_adbWatcherRunning) break;
-          _log('ADB watcher: device detected (wait-for-device exit=$exit) — running reverse');
+          _log(
+            'ADB watcher: device detected (wait-for-device exit=$exit) — running reverse',
+          );
 
           // run reverse for the configured port
-          final rev = await Process.run('adb', ['reverse', 'tcp:$_port', 'tcp:$_port'], runInShell: true);
-          _log('adb reverse exit=${rev.exitCode} stdout=${rev.stdout} stderr=${rev.stderr}');
+          final rev = await Process.run('adb', [
+            'reverse',
+            'tcp:$_port',
+            'tcp:$_port',
+          ], runInShell: true);
+          _log(
+            'adb reverse exit=${rev.exitCode} stdout=${rev.stdout} stderr=${rev.stderr}',
+          );
         } catch (e) {
           _log('ADB watcher error: $e');
         }
@@ -1006,6 +942,185 @@ class _HomeScreenState extends State<HomeScreen> {
       _adbWatcherProcess?.kill();
     } catch (_) {}
     _adbWatcherProcess = null;
+  }
+
+  // Parse key:value block (string or Map) into lowercase key -> value map.
+  Map<String, String> _parseKeyValueBlock(dynamic src) {
+    final Map<String, String> out = {};
+    String? s;
+    if (src == null) return out;
+    if (src is String) {
+      s = src;
+    } else if (src is Map) {
+      // If the map already contains labelled keys, return them lowercased.
+      final hasNonValueKeys = src.keys.any((k) => k.toString().toLowerCase() != 'value');
+      if (hasNonValueKeys) {
+        src.forEach((k, v) {
+          out[k.toString().toLowerCase()] = v?.toString() ?? '';
+        });
+        return out;
+      }
+      if (src.containsKey('value') && src['value'] is String) s = src['value'] as String;
+    }
+    if (s == null) return out;
+    for (final line in s.split(RegExp(r'[\r\n]+'))) {
+      final m = RegExp(r'^\s*([^:]+)\s*:\s*(.+)$').firstMatch(line);
+      if (m != null) {
+        out[m.group(1)!.trim().toLowerCase()] = m.group(2)!.trim();
+      }
+    }
+    return out;
+  }
+
+  // Route incoming raw map/text by its Type key.
+  // Returns true if routed (so caller doesn't add a generic row).
+  bool _routeByType(Map<String, dynamic> raw) {
+    // try direct keys first
+    String? type = _firstString(raw, ['type', 'Type']);
+    final kv = _parseKeyValueBlock(raw);
+    type ??= kv['type'];
+    if (type == null) return false;
+    final t = type.toLowerCase();
+
+    // prefer possible value string for leave parsing
+    final possibleValue = raw['value'] ?? kv['value'];
+
+    // Leave
+    if (t.contains('leave')) {
+      final pl = _tryParseLeaveApplication(raw) ?? _tryParseLeaveApplication(possibleValue);
+      if (pl != null) {
+        setState(() => _leaveApps.add(pl));
+        return true;
+      }
+      return false;
+    }
+
+    // Hostel
+    if (t.contains('hostel') || t.contains('hosteller')) {
+      final name = _firstString(raw, ['name', 'Name']) ?? kv['name'];
+      final id = _firstString(raw, ['id', 'Id', 'roll', 'roll_no', 'rollno']) ?? kv['roll number'] ?? kv['roll'];
+      final phone = _firstString(raw, ['phone', 'Phone', 'mobile']) ?? kv['phone number'] ?? kv['phone'];
+      final location = _firstString(raw, ['location', 'Location', 'address']) ?? kv['location'];
+      final minimal = <String, dynamic>{
+        'name': name,
+        'id': id,
+        'phone': phone,
+        'location': location,
+      };
+      _insertOrUpdateRow(_rows, minimal);
+      return true;
+    }
+
+    // Day scholar
+    if (t.contains('day') || t.contains('scholar')) {
+      final name = _firstString(raw, ['name', 'Name']) ?? kv['name'];
+      final id = _firstString(raw, ['id', 'Id', 'roll', 'roll_no', 'rollno']) ?? kv['roll number'] ?? kv['roll'];
+      final phone = _firstString(raw, ['phone', 'Phone', 'mobile']) ?? kv['phone number'] ?? kv['phone'];
+      final location = _firstString(raw, ['location', 'Location', 'address']) ?? kv['location'];
+      final minimal = <String, dynamic>{
+        'name': name,
+        'id': id,
+        'phone': phone,
+        'location': location,
+      };
+      _insertOrUpdateRow(_dayRows, minimal);
+      return true;
+    }
+
+    return false;
+  }
+
+  // per-table storage
+  final List<Map<String, dynamic>> _dayRows = [];
+  final List<Map<String, dynamic>> _leaveApps = [];
+
+  // Try to parse a leave-application block (String or Map).
+  // Returns normalized map or null if not a leave application.
+  Map<String, dynamic>? _tryParseLeaveApplication(dynamic src) {
+    if (src == null) return null;
+    String? s;
+    if (src is String) s = src;
+    if (src is Map) {
+      // lowercase map keys for easy lookup
+      final low = <String, String>{};
+      src.forEach((k, v) => low[k.toString().toLowerCase()] = v?.toString() ?? '');
+      if ((low['type'] ?? '').toLowerCase().contains('leave') || low.containsKey('leaving') || low.containsKey('returning')) {
+        return {
+          'type': 'Leave',
+          'name': low['name'],
+          'id': low['roll number'] ?? low['roll'] ?? low['id'],
+          'phone': low['phone number'] ?? low['phone'],
+          'leaving': low['leaving'],
+          'returning': low['returning'],
+          'duration': low['duration'],
+          'address': low['address'],
+          'receivedAt': _shortDateTime(DateTime.now()),
+        };
+      }
+      if (src.containsKey('value') && src['value'] is String) s = src['value'] as String;
+    }
+    if (s == null) return null;
+
+    final map = <String, String>{};
+    for (final line in s.split(RegExp(r'[\r\n]+'))) {
+      final m = RegExp(r'^\s*([^:]+)\s*:\s*(.+)$').firstMatch(line);
+      if (m != null) map[m.group(1)!.trim().toLowerCase()] = m.group(2)!.trim();
+    }
+    if (map.isEmpty) return null;
+
+    final type = map['type'];
+    if ((type != null && type.toLowerCase().contains('leave')) || map.containsKey('leaving') || map.containsKey('returning')) {
+      return {
+        'type': 'Leave',
+        'name': map['name'],
+        'id': map['roll number'] ?? map['roll'] ?? map['id'],
+        'phone': map['phone number'] ?? map['phone'],
+        'leaving': map['leaving'],
+        'returning': map['returning'],
+        'duration': map['duration'],
+        'address': map['address'],
+        'receivedAt': _shortDateTime(DateTime.now()),
+      };
+    }
+    return null;
+  }
+
+  // Insert or update a row in the given target list (dedupe by id -> phone -> name).
+  void _insertOrUpdateRow(List<Map<String, dynamic>> target, Map<String, dynamic> fields) {
+    final String? name = fields['name'] as String?;
+    final String? id = fields['id'] as String?;
+    final String? phone = fields['phone'] as String?;
+
+    for (var i = target.length - 1; i >= 0; i--) {
+      final r = target[i];
+      final sameById = id != null && r['id'] != null && r['id'].toString() == id;
+      final sameByPhone = (id == null || !sameById) && phone != null && r['phone'] != null && r['phone'].toString() == phone;
+      final sameByName = (id == null && phone == null) && name != null && r['name'] != null && r['name'].toString() == name;
+
+      if (sameById || sameByPhone || sameByName) {
+        final prevIn = r['intime'] as String?;
+        if (prevIn == null || prevIn.trim().isEmpty) {
+          final now = _shortDateTime(DateTime.now());
+          setState(() {
+            r['intime'] = now;
+            target[i] = Map<String, dynamic>.from(r);
+            _log('Updated existing row intime to $now for id=${id ?? phone ?? name}');
+          });
+        }
+        return;
+      }
+    }
+
+    final normalized = <String, dynamic>{
+      'name': name,
+      'id': id,
+      'phone': phone,
+      'location': fields['location'],
+      'intime': null,
+      'outtime': _shortDateTime(DateTime.now()),
+      'security': null,
+    };
+    setState(() => target.add(normalized));
   }
 }
 // git push

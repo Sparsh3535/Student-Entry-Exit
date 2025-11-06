@@ -6,9 +6,7 @@ class DayScholarScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(
-        title: const Text('Day scholar'),
-      ),
+      appBar: AppBar(title: const Text('Day scholar')),
       body: Padding(
         padding: const EdgeInsets.all(16.0),
         child: Column(

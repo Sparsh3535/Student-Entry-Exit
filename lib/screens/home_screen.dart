@@ -20,7 +20,9 @@ class _HomeScreenState extends State<HomeScreen> {
   bool _listening = false;
   int _port = 9000;
   final ScrollController _hScroll = ScrollController();
-  final TextEditingController _portController = TextEditingController(text: '9000');
+  final TextEditingController _portController = TextEditingController(
+    text: '9000',
+  );
 
   // ADB auto-reverse monitor — tries to run `adb reverse tcp:<port> tcp:<port>`
   // when an Android device is detected so you don't need to run adb manually.
@@ -41,7 +43,7 @@ class _HomeScreenState extends State<HomeScreen> {
     'location',
     'intime',
     'outtime',
-    'security'
+    'security',
   ];
   static const Map<String, String> _colLabels = {
     'name': 'Name',
@@ -50,7 +52,7 @@ class _HomeScreenState extends State<HomeScreen> {
     'location': 'Location',
     'intime': 'In Time',
     'outtime': 'Out Time',
-    'security': 'Security'
+    'security': 'Security',
   };
 
   @override
@@ -87,16 +89,21 @@ class _HomeScreenState extends State<HomeScreen> {
       _listening = true;
       _log('Server bound to ${_server!.address.address}:${_server!.port}');
       setState(() {});
-      _server!.listen(_handleClient, onError: (e) {
-        _log('Server error: $e');
-      }, onDone: () {
-        _log('Server closed');
-      });
+      _server!.listen(
+        _handleClient,
+        onError: (e) {
+          _log('Server error: $e');
+        },
+        onDone: () {
+          _log('Server closed');
+        },
+      );
     } catch (e) {
       _log('Failed to bind server on port $_port: $e');
       if (mounted) {
-        ScaffoldMessenger.of(context)
-            .showSnackBar(SnackBar(content: Text('Failed to start server on port $_port: $e')));
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Failed to start server on port $_port: $e')),
+        );
       }
     }
   }
@@ -115,33 +122,42 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   void _handleClient(Socket client) {
-    _log('Client connected: ${client.remoteAddress.address}:${client.remotePort}');
+    _log(
+      'Client connected: ${client.remoteAddress.address}:${client.remotePort}',
+    );
     String buffer = '';
 
-    client.listen((List<int> data) {
-      final snippet = utf8.decode(
-        data.length <= 200 ? data : data.sublist(0, 200),
-        allowMalformed: true,
-      );
-      // use double quotes and escape so inner single-quote usage doesn't break parsing
-      _log("Raw chunk bytes=${data.length}, text-snippet=\"${snippet.replaceAll('\n', '\\n')}\"");
-      final chunk = utf8.decode(data, allowMalformed: true);
-      buffer += chunk;
+    client.listen(
+      (List<int> data) {
+        final snippet = utf8.decode(
+          data.length <= 200 ? data : data.sublist(0, 200),
+          allowMalformed: true,
+        );
+        // use double quotes and escape so inner single-quote usage doesn't break parsing
+        _log(
+          "Raw chunk bytes=${data.length}, text-snippet=\"${snippet.replaceAll('\n', '\\n')}\"",
+        );
+        final chunk = utf8.decode(data, allowMalformed: true);
+        buffer += chunk;
 
-      _processBuffer(
-        bufferHolder: () => buffer,
-        bufferSetter: (s) => buffer = s,
-        clientAddr: client.remoteAddress.address,
-      );
-    }, onDone: () {
-      _log('Client disconnected: ${client.remoteAddress.address}');
-      if (buffer.trim().isNotEmpty) {
-        _processLine(buffer.trim());
-        buffer = '';
-      }
-    }, onError: (e) {
-      _log('Client read error: $e');
-    }, cancelOnError: true);
+        _processBuffer(
+          bufferHolder: () => buffer,
+          bufferSetter: (s) => buffer = s,
+          clientAddr: client.remoteAddress.address,
+        );
+      },
+      onDone: () {
+        _log('Client disconnected: ${client.remoteAddress.address}');
+        if (buffer.trim().isNotEmpty) {
+          _processLine(buffer.trim());
+          buffer = '';
+        }
+      },
+      onError: (e) {
+        _log('Client read error: $e');
+      },
+      cancelOnError: true,
+    );
   }
 
   void _processBuffer({
@@ -223,7 +239,9 @@ class _HomeScreenState extends State<HomeScreen> {
 
   void _processLine(String line) {
     if (line.isEmpty) return;
-    _log('Processing line (${line.length} chars): ${line.length > 200 ? line.substring(0, 200) + '...' : line}');
+    _log(
+      'Processing line (${line.length} chars): ${line.length > 200 ? line.substring(0, 200) + '...' : line}',
+    );
     try {
       final decoded = jsonDecode(line);
       if (decoded is List) {
@@ -249,9 +267,28 @@ class _HomeScreenState extends State<HomeScreen> {
       raw = {'value': obj?.toString()};
     }
 
-    String? name = _firstString(raw, ['name', 'Name', 'fullName', 'fullname', 'username']);
-    String? id = _firstString(raw, ['id', 'Id', 'roll', 'roll_no', 'rollno', 'rollNo']);
-    String? phone = _firstString(raw, ['phone', 'phone_number', 'phoneNumber', 'mobile', 'mobile_number']);
+    String? name = _firstString(raw, [
+      'name',
+      'Name',
+      'fullName',
+      'fullname',
+      'username',
+    ]);
+    String? id = _firstString(raw, [
+      'id',
+      'Id',
+      'roll',
+      'roll_no',
+      'rollno',
+      'rollNo',
+    ]);
+    String? phone = _firstString(raw, [
+      'phone',
+      'phone_number',
+      'phoneNumber',
+      'mobile',
+      'mobile_number',
+    ]);
     String? location = _firstString(raw, ['location', 'place', 'address']);
 
     // If incoming payload is a single string like:
@@ -268,34 +305,97 @@ class _HomeScreenState extends State<HomeScreen> {
 
       // common patterns (case-insensitive)
       name ??= extract(RegExp(r'Name\s*:\s*([^,\.]+)', caseSensitive: false));
-      id ??= extract(RegExp(r'(?:Roll(?:\s*Number)?|RollNo|Roll_No|ID|Id)\s*:\s*([^,\.]+)', caseSensitive: false));
-      phone ??= extract(RegExp(r'(?:(?:Phone|Mobile)(?:\s*Number)?)\s*:\s*([^,\.]+)', caseSensitive: false));
-      location ??= extract(RegExp(r'Location\s*:\s*([^,\.]+)', caseSensitive: false));
+      id ??= extract(
+        RegExp(
+          r'(?:Roll(?:\s*Number)?|RollNo|Roll_No|ID|Id)\s*:\s*([^,\.]+)',
+          caseSensitive: false,
+        ),
+      );
+      phone ??= extract(
+        RegExp(
+          r'(?:(?:Phone|Mobile)(?:\s*Number)?)\s*:\s*([^,\.]+)',
+          caseSensitive: false,
+        ),
+      );
+      location ??= extract(
+        RegExp(r'Location\s*:\s*([^,\.]+)', caseSensitive: false),
+      );
 
       // fallback: try picking tokens separated by commas with key:value pairs
       if (name == null || id == null || phone == null || location == null) {
         final parts = s.split(',').map((p) => p.trim()).toList();
         for (final p in parts) {
           if (name == null) {
-            final m = RegExp(r'^(?:Name)\s*:\s*(.+)$', caseSensitive: false).firstMatch(p);
+            final m = RegExp(
+              r'^(?:Name)\s*:\s*(.+)$',
+              caseSensitive: false,
+            ).firstMatch(p);
             if (m != null) name = m.group(1)?.trim();
           }
           if (id == null) {
-            final m = RegExp(r'^(?:Roll(?:\s*Number)?|ID)\s*:\s*(.+)$', caseSensitive: false).firstMatch(p);
+            final m = RegExp(
+              r'^(?:Roll(?:\s*Number)?|ID)\s*:\s*(.+)$',
+              caseSensitive: false,
+            ).firstMatch(p);
             if (m != null) id = m.group(1)?.trim();
           }
           if (phone == null) {
-            final m = RegExp(r'^(?:Phone(?:\s*Number)?|Mobile)\s*:\s*(.+)$', caseSensitive: false).firstMatch(p);
+            final m = RegExp(
+              r'^(?:Phone(?:\s*Number)?|Mobile)\s*:\s*(.+)$',
+              caseSensitive: false,
+            ).firstMatch(p);
             if (m != null) phone = m.group(1)?.trim();
           }
           if (location == null) {
-            final m = RegExp(r'^(?:Location)\s*:\s*(.+)$', caseSensitive: false).firstMatch(p);
+            final m = RegExp(
+              r'^(?:Location)\s*:\s*(.+)$',
+              caseSensitive: false,
+            ).firstMatch(p);
             if (m != null) location = m.group(1)?.trim();
           }
         }
       }
     }
 
+    // Find last matching existing row (by id, then phone, then name)
+    for (var i = _rows.length - 1; i >= 0; i--) {
+      final r = _rows[i];
+      final sameById =
+          id != null && r['id'] != null && r['id'].toString() == id;
+      final sameByPhone =
+          (id == null || !sameById) &&
+          phone != null &&
+          r['phone'] != null &&
+          r['phone'].toString() == phone;
+      final sameByName =
+          (id == null && phone == null) &&
+          name != null &&
+          r['name'] != null &&
+          r['name'].toString() == name;
+
+      if (sameById || sameByPhone || sameByName) {
+        // Update existing row: only modify the 'intime' column (do NOT add a new row)
+        // If intime is empty/null, set it to the current time (scan time) — do NOT add a new row.
+        final prevIn = r['intime'] as String?;
+        if (prevIn == null || prevIn.toString().trim().isEmpty) {
+          final now = _shortDateTime(DateTime.now());
+          setState(() {
+            r['intime'] = now;
+            _rows[i] = Map<String, dynamic>.from(r);
+            _log(
+              'Updated existing row intime to $now for id=${id ?? phone ?? name}',
+            );
+          });
+        } else {
+          _log(
+            'Duplicate scan received but intime already set — no new row created',
+          );
+        }
+        return; // done, do not add a new row
+      }
+    }
+
+    // No existing match — create a new entry as before
     final normalized = <String, dynamic>{
       'name': name,
       'id': id,
@@ -334,7 +434,9 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   List<DataColumn> _buildColumns() {
-    return _colKeys.map((k) => DataColumn(label: Text(_colLabels[k] ?? k))).toList();
+    return _colKeys
+        .map((k) => DataColumn(label: Text(_colLabels[k] ?? k)))
+        .toList();
   }
 
   List<DataRow> _buildRows() {
@@ -352,43 +454,53 @@ class _HomeScreenState extends State<HomeScreen> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Row(
-          children: [
-            _dashCard('Rows', '${_rows.length}'),
-          ],
-        ),
+        Row(children: [_dashCard('Rows', '${_rows.length}')]),
         const SizedBox(height: 12),
         Card(
           child: Padding(
             padding: const EdgeInsets.all(12.0),
-            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              const Text('Quick actions', style: TextStyle(fontWeight: FontWeight.bold)),
-              const SizedBox(height: 8),
-              Wrap(spacing: 8, children: [
-                ElevatedButton.icon(
-                  icon: const Icon(Icons.play_circle),
-                  label: const Text('Start Server'),
-                  onPressed: _listening ? null : _startServer,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text(
+                  'Quick actions',
+                  style: TextStyle(fontWeight: FontWeight.bold),
                 ),
-                ElevatedButton.icon(
-                  icon: const Icon(Icons.stop_circle),
-                  label: const Text('Stop Server'),
-                  onPressed: _listening ? _stopServer : null,
+                const SizedBox(height: 8),
+                Wrap(
+                  spacing: 8,
+                  children: [
+                    ElevatedButton.icon(
+                      icon: const Icon(Icons.play_circle),
+                      label: const Text('Start Server'),
+                      onPressed: _listening ? null : _startServer,
+                    ),
+                    ElevatedButton.icon(
+                      icon: const Icon(Icons.stop_circle),
+                      label: const Text('Stop Server'),
+                      onPressed: _listening ? _stopServer : null,
+                    ),
+                    ElevatedButton.icon(
+                      icon: const Icon(Icons.clear_all),
+                      label: const Text('Clear Table'),
+                      onPressed: _clear,
+                    ),
+                  ],
                 ),
-                ElevatedButton.icon(
-                  icon: const Icon(Icons.clear_all),
-                  label: const Text('Clear Table'),
-                  onPressed: _clear,
-                ),
-              ]),
-            ]),
+              ],
+            ),
           ),
         ),
       ],
     );
   }
 
-  Widget _dashCard(String title, String value, {double width = 140, Color? color}) {
+  Widget _dashCard(
+    String title,
+    String value, {
+    double width = 140,
+    Color? color,
+  }) {
     return Card(
       child: Container(
         width: width,
@@ -396,9 +508,15 @@ class _HomeScreenState extends State<HomeScreen> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text(title, style: const TextStyle(fontSize: 12, color: Colors.grey)),
+            Text(
+              title,
+              style: const TextStyle(fontSize: 12, color: Colors.grey),
+            ),
             const SizedBox(height: 6),
-            Text(value, style: TextStyle(fontSize: 16, color: color ?? Colors.black)),
+            Text(
+              value,
+              style: TextStyle(fontSize: 16, color: color ?? Colors.black),
+            ),
           ],
         ),
       ),
@@ -419,7 +537,10 @@ class _HomeScreenState extends State<HomeScreen> {
                 children: const [
                   Icon(Icons.flight, color: Colors.white),
                   SizedBox(width: 12),
-                  Text('Attendance', style: TextStyle(color: Colors.white, fontSize: 18)),
+                  Text(
+                    'Attendance',
+                    style: TextStyle(color: Colors.white, fontSize: 18),
+                  ),
                 ],
               ),
             ),
@@ -456,9 +577,15 @@ class _HomeScreenState extends State<HomeScreen> {
               title: const Text('About'),
               onTap: () {
                 Navigator.of(context).pop();
-                showAboutDialog(context: context, applicationName: 'Attendance Dashboard', children: [
-                  const Text('Receives JSON over TCP and shows attendance records.')
-                ]);
+                showAboutDialog(
+                  context: context,
+                  applicationName: 'Attendance Dashboard',
+                  children: [
+                    const Text(
+                      'Receives JSON over TCP and shows attendance records.',
+                    ),
+                  ],
+                );
               },
             ),
           ],
@@ -477,7 +604,10 @@ class _HomeScreenState extends State<HomeScreen> {
             color: Colors.grey.shade200,
             child: Row(
               children: [
-                const Text('Console', style: TextStyle(fontWeight: FontWeight.bold)),
+                const Text(
+                  'Console',
+                  style: TextStyle(fontWeight: FontWeight.bold),
+                ),
                 const Spacer(),
                 IconButton(
                   tooltip: 'Copy console',
@@ -509,12 +639,17 @@ class _HomeScreenState extends State<HomeScreen> {
                   itemCount: _logs.length,
                   itemBuilder: (context, idx) {
                     final text = _logs[idx];
-                    final isConn = text.contains('Client connected') || text.contains('Client disconnected');
+                    final isConn =
+                        text.contains('Client connected') ||
+                        text.contains('Client disconnected');
                     return ListTile(
                       dense: true,
                       title: Text(
                         text,
-                        style: TextStyle(fontSize: 12, color: isConn ? Colors.blue : Colors.black87),
+                        style: TextStyle(
+                          fontSize: 12,
+                          color: isConn ? Colors.blue : Colors.black87,
+                        ),
                       ),
                     );
                   },
@@ -564,48 +699,67 @@ class _HomeScreenState extends State<HomeScreen> {
       return Card(
         child: Padding(
           padding: const EdgeInsets.all(12.0),
-          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-            const Text('Settings', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
-            const SizedBox(height: 12),
-            Row(
-              children: [
-                Expanded(
-                  child: TextFormField(
-                    controller: _portController,
-                    decoration: const InputDecoration(labelText: 'Port', border: OutlineInputBorder()),
-                    keyboardType: TextInputType.number,
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text(
+                'Settings',
+                style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+              ),
+              const SizedBox(height: 12),
+              Row(
+                children: [
+                  Expanded(
+                    child: TextFormField(
+                      controller: _portController,
+                      decoration: const InputDecoration(
+                        labelText: 'Port',
+                        border: OutlineInputBorder(),
+                      ),
+                      keyboardType: TextInputType.number,
+                    ),
                   ),
-                ),
-                const SizedBox(width: 12),
-                ElevatedButton.icon(
-                  icon: Icon(_listening ? Icons.stop_circle : Icons.play_circle),
-                  label: Text(_listening ? 'Stop' : 'Start'),
-                  onPressed: () {
-                    if (_listening) {
-                      _stopServer();
-                    } else {
-                      _startServer();
-                    }
-                  },
-                ),
-              ],
-            ),
-            const SizedBox(height: 16),
-            Row(
-              children: [
-                const Text('Server status:', style: TextStyle(fontWeight: FontWeight.bold)),
-                const SizedBox(width: 8),
-                Text(_listening ? 'Listening' : 'Stopped',
-                    style: TextStyle(color: _listening ? Colors.green : Colors.red, fontWeight: FontWeight.bold)),
-              ],
-            ),
-            const SizedBox(height: 12),
-            ElevatedButton.icon(
-              icon: const Icon(Icons.clear_all),
-              label: const Text('Clear Table'),
-              onPressed: _clear,
-            ),
-          ]),
+                  const SizedBox(width: 12),
+                  ElevatedButton.icon(
+                    icon: Icon(
+                      _listening ? Icons.stop_circle : Icons.play_circle,
+                    ),
+                    label: Text(_listening ? 'Stop' : 'Start'),
+                    onPressed: () {
+                      if (_listening) {
+                        _stopServer();
+                      } else {
+                        _startServer();
+                      }
+                    },
+                  ),
+                ],
+              ),
+              const SizedBox(height: 16),
+              Row(
+                children: [
+                  const Text(
+                    'Server status:',
+                    style: TextStyle(fontWeight: FontWeight.bold),
+                  ),
+                  const SizedBox(width: 8),
+                  Text(
+                    _listening ? 'Listening' : 'Stopped',
+                    style: TextStyle(
+                      color: _listening ? Colors.green : Colors.red,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 12),
+              ElevatedButton.icon(
+                icon: const Icon(Icons.clear_all),
+                label: const Text('Clear Table'),
+                onPressed: _clear,
+              ),
+            ],
+          ),
         ),
       );
     }
@@ -671,13 +825,19 @@ class _HomeScreenState extends State<HomeScreen> {
       }
 
       _log('ADB: device detected, attempting reverse tcp:$_port');
-      final rev = await Process.run('adb', ['reverse', 'tcp:$_port', 'tcp:$_port']);
+      final rev = await Process.run('adb', [
+        'reverse',
+        'tcp:$_port',
+        'tcp:$_port',
+      ]);
       if (rev.exitCode == 0) {
         _adbReverseDone = true;
         _log('ADB reverse succeeded for port $_port');
         _stopAdbMonitor();
       } else {
-        _log('ADB reverse failed (exit ${rev.exitCode}): ${rev.stdout}${rev.stderr}');
+        _log(
+          'ADB reverse failed (exit ${rev.exitCode}): ${rev.stdout}${rev.stderr}',
+        );
       }
     } catch (e) {
       // adb not found or other OS error
@@ -685,3 +845,4 @@ class _HomeScreenState extends State<HomeScreen> {
     }
   }
 }
+// git push

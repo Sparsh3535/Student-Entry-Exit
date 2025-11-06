@@ -422,7 +422,7 @@ class _HomeScreenState extends State<HomeScreen> {
                 Navigator.of(context).push(
                   MaterialPageRoute(
                     builder: (_) =>
-                        LeaveApplicationsScreen(applications: _leaveApps),
+                        LeaveApplicationsScreen(applicationsNotifier: _leaveAppsNotifier),
                   ),
                 );
               },
@@ -527,7 +527,7 @@ class _HomeScreenState extends State<HomeScreen> {
                 Navigator.of(context).push(
                   MaterialPageRoute(
                     builder: (_) =>
-                        LeaveApplicationsScreen(applications: _leaveApps),
+                        LeaveApplicationsScreen(applicationsNotifier: _leaveAppsNotifier),
                   ),
                 );
               },
@@ -1025,76 +1025,14 @@ class _HomeScreenState extends State<HomeScreen> {
   // Route incoming raw map/text by its Type key.
   // Returns true if routed (so caller doesn't add a generic row).
   bool _routeByType(Map<String, dynamic> raw) {
-    // try direct keys first
-    String? type = _firstString(raw, ['type', 'Type']);
-    final kv = _parseKeyValueBlock(raw);
-    type ??= kv['type'];
-    if (type == null) return false;
-    final t = type.toLowerCase();
-
-    // prefer possible value string for leave parsing
-    final possibleValue = raw['value'] ?? kv['value'];
-
-    // Leave
-    if (t.contains('leave')) {
-      final pl =
-          _tryParseLeaveApplication(raw) ??
-          _tryParseLeaveApplication(possibleValue);
-      if (pl != null) {
-        setState(() => _leaveApps.add(pl));
-        return true;
-      }
-      return false;
-    }
-
-    // Hostel
-    if (t.contains('hostel') || t.contains('hosteller')) {
-      final name = _firstString(raw, ['name', 'Name']) ?? kv['name'];
-      final id =
-          _firstString(raw, ['id', 'Id', 'roll', 'roll_no', 'rollno']) ??
-          kv['roll number'] ??
-          kv['roll'];
-      final phone =
-          _firstString(raw, ['phone', 'Phone', 'mobile']) ??
-          kv['phone number'] ??
-          kv['phone'];
-      final location =
-          _firstString(raw, ['location', 'Location', 'address']) ??
-          kv['location'];
-      final minimal = <String, dynamic>{
-        'name': name,
-        'id': id,
-        'phone': phone,
-        'location': location,
-      };
-      _insertOrUpdateRow(_rows, minimal);
+    final type = (raw['type'] ?? raw['Type'] ?? '').toString().toLowerCase();
+    if (type.contains('leave')) {
+      final normalized = _tryParseLeaveApplication(raw) ?? raw;
+      _insertOrUpdateRow(_leaveApps, normalized);
       return true;
     }
 
-    // Day scholar
-    if (t.contains('day') || t.contains('scholar')) {
-      final name = _firstString(raw, ['name', 'Name']) ?? kv['name'];
-      final id =
-          _firstString(raw, ['id', 'Id', 'roll', 'roll_no', 'rollno']) ??
-          kv['roll number'] ??
-          kv['roll'];
-      final phone =
-          _firstString(raw, ['phone', 'Phone', 'mobile']) ??
-          kv['phone number'] ??
-          kv['phone'];
-      final location =
-          _firstString(raw, ['location', 'Location', 'address']) ??
-          kv['location'];
-      final minimal = <String, dynamic>{
-        'name': name,
-        'id': id,
-        'phone': phone,
-        'location': location,
-      };
-      _insertOrUpdateDayRow(_dayRows, minimal);
-      return true;
-    }
-
+    // other routing...
     return false;
   }
 
@@ -1230,39 +1168,60 @@ class _HomeScreenState extends State<HomeScreen> {
 
   // Insert or update into target list (dedupe by id -> phone -> name).
   void _insertOrUpdateRow(List<Map<String, dynamic>> target, Map<String, dynamic> fields) {
-    final name = fields['name'] as String?;
-    final id = fields['id'] as String?;
-    final phone = fields['phone'] as String?;
+    // basic dedupe/update: id -> phone -> name (case-insensitive)
+    int idx = -1;
+    final idVal = fields['id'] ?? fields['Id'];
+    final phoneVal = fields['phone'] ?? fields['Phone'] ?? fields['mobile'];
+    final nameVal = (fields['name'] ?? fields['Name'])?.toString().toLowerCase();
 
-    for (var i = target.length - 1; i >= 0; i--) {
-      final r = target[i];
-      final sameById = id != null && r['id'] != null && r['id'].toString() == id;
-      final sameByPhone = (id == null || !sameById) && phone != null && r['phone'] != null && r['phone'].toString() == phone;
-      final sameByName = (id == null && phone == null) && name != null && r['name'] != null && r['name'].toString() == name;
-      if (sameById || sameByPhone || sameByName) {
-        final prevIn = r['intime'] as String?;
-        if (prevIn == null || prevIn.toString().trim().isEmpty) {
-          final now = _shortDateTime(DateTime.now());
-          setState(() {
-            r['intime'] = now;
-            target[i] = Map<String, dynamic>.from(r);
-            _log('Updated existing row intime to $now for id=${id ?? phone ?? name}');
-          });
-        }
-        return;
-      }
+    if (idVal != null) {
+      idx = target.indexWhere((r) => (r['id'] ?? r['Id']) == idVal);
+    }
+    if (idx == -1 && phoneVal != null) {
+      idx = target.indexWhere((r) {
+        final p = r['phone'] ?? r['Phone'] ?? r['mobile'];
+        return p != null && p == phoneVal;
+      });
+    }
+    if (idx == -1 && nameVal != null) {
+      idx = target.indexWhere((r) {
+        final n = (r['name'] ?? r['Name'])?.toString().toLowerCase();
+        return n != null && n == nameVal;
+      });
     }
 
-    final normalized = <String, dynamic>{
-      'name': name,
-      'id': id,
-      'phone': phone,
-      'location': fields['location'],
-      'intime': null,
-      'outtime': _shortDateTime(DateTime.now()),
-      'security': null,
-    };
-    setState(() => target.add(normalized));
+    if (idx != -1) {
+      // merge fields into existing row
+      target[idx] = {...target[idx], ...fields};
+    } else {
+      // new entry
+      final entry = {...fields};
+      entry['receivedAt'] = DateTime.now().toIso8601String();
+      target.insert(0, entry);
+    }
+
+    // publish notifier changes for listeners
+    if (identical(target, _leaveApps)) {
+      _leaveAppsNotifier.value = List<Map<String, dynamic>>.from(_leaveApps);
+    }
+    if (identical(target, _dayRows)) {
+      _dayRowsNotifier.value = List<Map<String, dynamic>>.from(_dayRows);
+    }
+
+    // ensure UI refresh
+    if (mounted) setState(() {});
+  }
+
+  // example nav button or list tile that opens leave screen
+  void _openLeaveScreen() {
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => LeaveApplicationsScreen(
+          applicationsNotifier: _leaveAppsNotifier,
+        ),
+      ),
+    );
   }
 }
 // git push

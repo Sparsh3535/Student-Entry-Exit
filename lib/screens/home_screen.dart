@@ -280,10 +280,16 @@ class _HomeScreenState extends State<HomeScreen> {
     if (kvFromValue.isNotEmpty) {
       kvFromValue.forEach((k, v) {
         // prefer existing explicit keys in raw; otherwise inject parsed value
-        if (!raw.containsKey(k) || raw[k] == null || raw[k].toString().trim().isEmpty) raw[k] = v;
+        if (!raw.containsKey(k) ||
+            raw[k] == null ||
+            raw[k].toString().trim().isEmpty)
+          raw[k] = v;
         // also add a capitalized variants to help older lookups
         final cap = _capitalizedKey(k);
-        if (!raw.containsKey(cap) || raw[cap] == null || raw[cap].toString().trim().isEmpty) raw[cap] = v;
+        if (!raw.containsKey(cap) ||
+            raw[cap] == null ||
+            raw[cap].toString().trim().isEmpty)
+          raw[cap] = v;
       });
     }
 
@@ -291,10 +297,44 @@ class _HomeScreenState extends State<HomeScreen> {
     if (_routeByType(raw)) return;
 
     // Build normalized row preferring parsed kv values then map keys
-    final name = _firstString(raw, ['name', 'Name', 'fullName', 'fullname', 'username']) ?? kvFromValue['name'] ?? '';
-    final id = _firstString(raw, ['id', 'Id', 'roll', 'roll_no', 'rollno', 'Roll Number', 'roll number']) ?? kvFromValue['roll number'] ?? kvFromValue['roll'] ?? '';
-    final phone = _firstString(raw, ['phone', 'Phone', 'mobile', 'Phone Number', 'phone number']) ?? kvFromValue['phone number'] ?? kvFromValue['phone'] ?? '';
-    final location = _firstString(raw, ['location', 'Location', 'address']) ?? kvFromValue['location'] ?? '';
+    final name =
+        _firstString(raw, [
+          'name',
+          'Name',
+          'fullName',
+          'fullname',
+          'username',
+        ]) ??
+        kvFromValue['name'] ??
+        '';
+    final id =
+        _firstString(raw, [
+          'id',
+          'Id',
+          'roll',
+          'roll_no',
+          'rollno',
+          'Roll Number',
+          'roll number',
+        ]) ??
+        kvFromValue['roll number'] ??
+        kvFromValue['roll'] ??
+        '';
+    final phone =
+        _firstString(raw, [
+          'phone',
+          'Phone',
+          'mobile',
+          'Phone Number',
+          'phone number',
+        ]) ??
+        kvFromValue['phone number'] ??
+        kvFromValue['phone'] ??
+        '';
+    final location =
+        _firstString(raw, ['location', 'Location', 'address']) ??
+        kvFromValue['location'] ??
+        '';
 
     final normalized = <String, dynamic>{
       'name': name,
@@ -312,7 +352,9 @@ class _HomeScreenState extends State<HomeScreen> {
   String _capitalizedKey(String k) {
     if (k.isEmpty) return k;
     final parts = k.split(RegExp(r'\s+'));
-    return parts.map((p) => p.isEmpty ? p : (p[0].toUpperCase() + p.substring(1))).join(' ');
+    return parts
+        .map((p) => p.isEmpty ? p : (p[0].toUpperCase() + p.substring(1)))
+        .join(' ');
   }
 
   String? _firstString(Map<String, dynamic> m, List<String> keys) {
@@ -366,7 +408,7 @@ class _HomeScreenState extends State<HomeScreen> {
             InkWell(
               onTap: () {
                 Navigator.of(context).push(
-                  MaterialPageRoute(builder: (_) => const DayScholarScreen()),
+                  MaterialPageRoute(builder: (_) => DayScholarScreen(applications: _dayRows)),
                 );
               },
               child: _dashCard('Day scholar', 'Open'),
@@ -377,7 +419,7 @@ class _HomeScreenState extends State<HomeScreen> {
               onTap: () {
                 Navigator.of(context).push(
                   MaterialPageRoute(
-                    builder: (_) => const LeaveApplicationsScreen(),
+                    builder: (_) => LeaveApplicationsScreen(applications: _leaveApps),
                   ),
                 );
               },
@@ -481,7 +523,7 @@ class _HomeScreenState extends State<HomeScreen> {
                 Navigator.of(context).pop();
                 Navigator.of(context).push(
                   MaterialPageRoute(
-                    builder: (_) => const LeaveApplicationsScreen(),
+                    builder: (_) => LeaveApplicationsScreen(applications: _leaveApps),
                   ),
                 );
               },
@@ -511,7 +553,7 @@ class _HomeScreenState extends State<HomeScreen> {
               onTap: () {
                 Navigator.of(context).pop();
                 Navigator.of(context).push(
-                  MaterialPageRoute(builder: (_) => const DayScholarScreen()),
+                  MaterialPageRoute(builder: (_) => DayScholarScreen(applications: _dayRows)),
                 );
               },
             ),
@@ -953,14 +995,17 @@ class _HomeScreenState extends State<HomeScreen> {
       s = src;
     } else if (src is Map) {
       // If the map already contains labelled keys, return them lowercased.
-      final hasNonValueKeys = src.keys.any((k) => k.toString().toLowerCase() != 'value');
+      final hasNonValueKeys = src.keys.any(
+        (k) => k.toString().toLowerCase() != 'value',
+      );
       if (hasNonValueKeys) {
         src.forEach((k, v) {
           out[k.toString().toLowerCase()] = v?.toString() ?? '';
         });
         return out;
       }
-      if (src.containsKey('value') && src['value'] is String) s = src['value'] as String;
+      if (src.containsKey('value') && src['value'] is String)
+        s = src['value'] as String;
     }
     if (s == null) return out;
     for (final line in s.split(RegExp(r'[\r\n]+'))) {
@@ -987,7 +1032,9 @@ class _HomeScreenState extends State<HomeScreen> {
 
     // Leave
     if (t.contains('leave')) {
-      final pl = _tryParseLeaveApplication(raw) ?? _tryParseLeaveApplication(possibleValue);
+      final pl =
+          _tryParseLeaveApplication(raw) ??
+          _tryParseLeaveApplication(possibleValue);
       if (pl != null) {
         setState(() => _leaveApps.add(pl));
         return true;
@@ -998,9 +1045,17 @@ class _HomeScreenState extends State<HomeScreen> {
     // Hostel
     if (t.contains('hostel') || t.contains('hosteller')) {
       final name = _firstString(raw, ['name', 'Name']) ?? kv['name'];
-      final id = _firstString(raw, ['id', 'Id', 'roll', 'roll_no', 'rollno']) ?? kv['roll number'] ?? kv['roll'];
-      final phone = _firstString(raw, ['phone', 'Phone', 'mobile']) ?? kv['phone number'] ?? kv['phone'];
-      final location = _firstString(raw, ['location', 'Location', 'address']) ?? kv['location'];
+      final id =
+          _firstString(raw, ['id', 'Id', 'roll', 'roll_no', 'rollno']) ??
+          kv['roll number'] ??
+          kv['roll'];
+      final phone =
+          _firstString(raw, ['phone', 'Phone', 'mobile']) ??
+          kv['phone number'] ??
+          kv['phone'];
+      final location =
+          _firstString(raw, ['location', 'Location', 'address']) ??
+          kv['location'];
       final minimal = <String, dynamic>{
         'name': name,
         'id': id,
@@ -1014,9 +1069,17 @@ class _HomeScreenState extends State<HomeScreen> {
     // Day scholar
     if (t.contains('day') || t.contains('scholar')) {
       final name = _firstString(raw, ['name', 'Name']) ?? kv['name'];
-      final id = _firstString(raw, ['id', 'Id', 'roll', 'roll_no', 'rollno']) ?? kv['roll number'] ?? kv['roll'];
-      final phone = _firstString(raw, ['phone', 'Phone', 'mobile']) ?? kv['phone number'] ?? kv['phone'];
-      final location = _firstString(raw, ['location', 'Location', 'address']) ?? kv['location'];
+      final id =
+          _firstString(raw, ['id', 'Id', 'roll', 'roll_no', 'rollno']) ??
+          kv['roll number'] ??
+          kv['roll'];
+      final phone =
+          _firstString(raw, ['phone', 'Phone', 'mobile']) ??
+          kv['phone number'] ??
+          kv['phone'];
+      final location =
+          _firstString(raw, ['location', 'Location', 'address']) ??
+          kv['location'];
       final minimal = <String, dynamic>{
         'name': name,
         'id': id,
@@ -1043,8 +1106,12 @@ class _HomeScreenState extends State<HomeScreen> {
     if (src is Map) {
       // lowercase map keys for easy lookup
       final low = <String, String>{};
-      src.forEach((k, v) => low[k.toString().toLowerCase()] = v?.toString() ?? '');
-      if ((low['type'] ?? '').toLowerCase().contains('leave') || low.containsKey('leaving') || low.containsKey('returning')) {
+      src.forEach(
+        (k, v) => low[k.toString().toLowerCase()] = v?.toString() ?? '',
+      );
+      if ((low['type'] ?? '').toLowerCase().contains('leave') ||
+          low.containsKey('leaving') ||
+          low.containsKey('returning')) {
         return {
           'type': 'Leave',
           'name': low['name'],
@@ -1057,7 +1124,8 @@ class _HomeScreenState extends State<HomeScreen> {
           'receivedAt': _shortDateTime(DateTime.now()),
         };
       }
-      if (src.containsKey('value') && src['value'] is String) s = src['value'] as String;
+      if (src.containsKey('value') && src['value'] is String)
+        s = src['value'] as String;
     }
     if (s == null) return null;
 
@@ -1069,7 +1137,9 @@ class _HomeScreenState extends State<HomeScreen> {
     if (map.isEmpty) return null;
 
     final type = map['type'];
-    if ((type != null && type.toLowerCase().contains('leave')) || map.containsKey('leaving') || map.containsKey('returning')) {
+    if ((type != null && type.toLowerCase().contains('leave')) ||
+        map.containsKey('leaving') ||
+        map.containsKey('returning')) {
       return {
         'type': 'Leave',
         'name': map['name'],
@@ -1086,16 +1156,28 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   // Insert or update a row in the given target list (dedupe by id -> phone -> name).
-  void _insertOrUpdateRow(List<Map<String, dynamic>> target, Map<String, dynamic> fields) {
+  void _insertOrUpdateRow(
+    List<Map<String, dynamic>> target,
+    Map<String, dynamic> fields,
+  ) {
     final String? name = fields['name'] as String?;
     final String? id = fields['id'] as String?;
     final String? phone = fields['phone'] as String?;
 
     for (var i = target.length - 1; i >= 0; i--) {
       final r = target[i];
-      final sameById = id != null && r['id'] != null && r['id'].toString() == id;
-      final sameByPhone = (id == null || !sameById) && phone != null && r['phone'] != null && r['phone'].toString() == phone;
-      final sameByName = (id == null && phone == null) && name != null && r['name'] != null && r['name'].toString() == name;
+      final sameById =
+          id != null && r['id'] != null && r['id'].toString() == id;
+      final sameByPhone =
+          (id == null || !sameById) &&
+          phone != null &&
+          r['phone'] != null &&
+          r['phone'].toString() == phone;
+      final sameByName =
+          (id == null && phone == null) &&
+          name != null &&
+          r['name'] != null &&
+          r['name'].toString() == name;
 
       if (sameById || sameByPhone || sameByName) {
         final prevIn = r['intime'] as String?;
@@ -1104,7 +1186,9 @@ class _HomeScreenState extends State<HomeScreen> {
           setState(() {
             r['intime'] = now;
             target[i] = Map<String, dynamic>.from(r);
-            _log('Updated existing row intime to $now for id=${id ?? phone ?? name}');
+            _log(
+              'Updated existing row intime to $now for id=${id ?? phone ?? name}',
+            );
           });
         }
         return;

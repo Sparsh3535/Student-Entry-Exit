@@ -4,6 +4,8 @@ import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'day_scholar.dart';
+import 'leave_applications.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -460,7 +462,31 @@ class _HomeScreenState extends State<HomeScreen> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Row(children: [_dashCard('Rows', '${_rows.length}')]),
+        Row(
+          children: [
+            _dashCard('Rows', '${_rows.length}'),
+            const SizedBox(width: 12),
+            // Day scholar card — opens separate screen
+            InkWell(
+              onTap: () {
+                Navigator.of(context).push(
+                  MaterialPageRoute(builder: (_) => const DayScholarScreen()),
+                );
+              },
+              child: _dashCard('Day scholar', 'Open'),
+            ),
+            const SizedBox(width: 12),
+            // Leave Applications card — opens separate screen
+            InkWell(
+              onTap: () {
+                Navigator.of(context).push(
+                  MaterialPageRoute(builder: (_) => const LeaveApplicationsScreen()),
+                );
+              },
+              child: _dashCard('Leave Applications', 'Open'),
+            ),
+          ],
+        ),
         const SizedBox(height: 12),
         Card(
           child: Padding(
@@ -541,14 +567,24 @@ class _HomeScreenState extends State<HomeScreen> {
               color: Colors.black87,
               child: Row(
                 children: const [
-                  Icon(Icons.flight, color: Colors.white),
+                  Icon(Icons.dashboard, color: Colors.white),
                   SizedBox(width: 12),
                   Text(
-                    'Attendance',
+                    'Dashboard',
                     style: TextStyle(color: Colors.white, fontSize: 18),
                   ),
                 ],
               ),
+            ),
+            ListTile(
+              leading: const Icon(Icons.assignment),
+              title: const Text('Leave Applications'),
+              onTap: () {
+                Navigator.of(context).pop();
+                Navigator.of(context).push(
+                  MaterialPageRoute(builder: (_) => const LeaveApplicationsScreen()),
+                );
+              },
             ),
             ListTile(
               leading: const Icon(Icons.code),
@@ -561,11 +597,22 @@ class _HomeScreenState extends State<HomeScreen> {
             ),
             ListTile(
               leading: const Icon(Icons.table_chart),
-              title: const Text('Table'),
+              title: const Text('Hostel'),
               selected: _navSelection == 'table',
               onTap: () {
                 setState(() => _navSelection = 'table');
                 Navigator.of(context).pop();
+              },
+            ),
+            ListTile(
+              leading: const Icon(Icons.person_outline),
+              title: const Text('Day scholar'),
+              selected: _navSelection == 'day_scholar',
+              onTap: () {
+                Navigator.of(context).pop();
+                Navigator.of(context).push(
+                  MaterialPageRoute(builder: (_) => const DayScholarScreen()),
+                );
               },
             ),
             ListTile(
@@ -667,10 +714,19 @@ class _HomeScreenState extends State<HomeScreen> {
 
   Widget _buildMainContent() {
     if (_navSelection == 'console') {
+      // show dashboard above console so the Day scholar card is visible and tappable
       return Card(
         child: Padding(
           padding: const EdgeInsets.all(8.0),
-          child: _buildConsoleView(showControls: true),
+          child: Column(
+            children: [
+              // dashboard (cards + quick actions)
+              _buildDashboard(),
+              const SizedBox(height: 8),
+              // console area expands to fill remaining space
+              Expanded(child: _buildConsoleView(showControls: true)),
+            ],
+          ),
         ),
       );
     } else if (_navSelection == 'table') {
@@ -785,7 +841,7 @@ class _HomeScreenState extends State<HomeScreen> {
           icon: const Icon(Icons.menu),
           onPressed: () => _scaffoldKey.currentState?.openDrawer(),
         ),
-        title: const Text('Student Entry/Exit log'),
+        title: const Text('Hostel Entry/Out'),
         actions: const [], // no top-right actions
       ),
       body: Padding(

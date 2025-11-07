@@ -27,10 +27,11 @@ class DayScholarScreen extends StatelessWidget {
             child: ValueListenableBuilder<List<Map<String, dynamic>>>(
               valueListenable: applicationsListenable,
               builder: (context, rows, _) {
-                if (rows.isEmpty)
+                if (rows.isEmpty) {
                   return const Center(
                     child: Text('No day scholar entries yet.'),
                   );
+                }
                 return SingleChildScrollView(
                   scrollDirection: Axis.horizontal,
                   child: ConstrainedBox(

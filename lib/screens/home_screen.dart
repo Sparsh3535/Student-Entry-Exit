@@ -76,6 +76,13 @@ class _HomeScreenState extends State<HomeScreen> {
     _portController.dispose();
     _stopAdbMonitor();
     _stopAdbWatcher();
+    // dispose notifiers
+    try {
+      _dayRowsNotifier.dispose();
+    } catch (_) {}
+    try {
+      _leaveAppsNotifier.dispose();
+    } catch (_) {}
     super.dispose();
   }
 
@@ -207,7 +214,7 @@ class _HomeScreenState extends State<HomeScreen> {
 
   int _firstNonWhitespaceIndex(String s) {
     for (var i = 0; i < s.length; i++) {
-      if (!s[i].trim().isEmpty) return i;
+      if (s[i].trim().isNotEmpty) return i;
     }
     return -1;
   }
@@ -248,7 +255,7 @@ class _HomeScreenState extends State<HomeScreen> {
   void _processLine(String line) {
     if (line.isEmpty) return;
     _log(
-      'Processing line (${line.length} chars): ${line.length > 200 ? line.substring(0, 200) + '...' : line}',
+      'Processing line (${line.length} chars): ${line.length > 200 ? '${line.substring(0, 200)}...' : line}',
     );
     try {
       final decoded = jsonDecode(line);
@@ -282,14 +289,16 @@ class _HomeScreenState extends State<HomeScreen> {
         // prefer existing explicit keys in raw; otherwise inject parsed value
         if (!raw.containsKey(k) ||
             raw[k] == null ||
-            raw[k].toString().trim().isEmpty)
+            raw[k].toString().trim().isEmpty) {
           raw[k] = v;
+        }
         // also add a capitalized variants to help older lookups
         final cap = _capitalizedKey(k);
         if (!raw.containsKey(cap) ||
             raw[cap] == null ||
-            raw[cap].toString().trim().isEmpty)
+            raw[cap].toString().trim().isEmpty) {
           raw[cap] = v;
+        }
       });
     }
 
@@ -423,8 +432,9 @@ class _HomeScreenState extends State<HomeScreen> {
               onTap: () {
                 Navigator.of(context).push(
                   MaterialPageRoute(
-                    builder: (_) =>
-                        LeaveApplicationsScreen(applications: _leaveApps),
+                    builder: (_) => LeaveApplicationsScreen(
+                      applicationsListenable: _leaveAppsNotifier,
+                    ),
                   ),
                 );
               },
@@ -528,8 +538,9 @@ class _HomeScreenState extends State<HomeScreen> {
                 Navigator.of(context).pop();
                 Navigator.of(context).push(
                   MaterialPageRoute(
-                    builder: (_) =>
-                        LeaveApplicationsScreen(applications: _leaveApps),
+                    builder: (_) => LeaveApplicationsScreen(
+                      applicationsListenable: _leaveAppsNotifier,
+                    ),
                   ),
                 );
               },
@@ -1014,8 +1025,9 @@ class _HomeScreenState extends State<HomeScreen> {
         });
         return out;
       }
-      if (src.containsKey('value') && src['value'] is String)
+      if (src.containsKey('value') && src['value'] is String) {
         s = src['value'] as String;
+      }
     }
     if (s == null) return out;
     for (final line in s.split(RegExp(r'[\r\n]+'))) {
@@ -1046,7 +1058,11 @@ class _HomeScreenState extends State<HomeScreen> {
           _tryParseLeaveApplication(raw) ??
           _tryParseLeaveApplication(possibleValue);
       if (pl != null) {
-        setState(() => _leaveApps.add(pl));
+        setState(() {
+          _leaveApps.add(pl);
+          // Add this line to trigger updates:
+          _leaveAppsNotifier.value = List.from(_leaveApps);
+        });
         return true;
       }
       return false;
@@ -1106,6 +1122,10 @@ class _HomeScreenState extends State<HomeScreen> {
   // per-table storage (hostel/day/leave)
   final List<Map<String, dynamic>> _dayRows = [];
   final List<Map<String, dynamic>> _leaveApps = [];
+
+  // notifier for leave applications (real-time listeners can watch this)
+  final ValueNotifier<List<Map<String, dynamic>>> _leaveAppsNotifier =
+      ValueNotifier(const []);
 
   // notifier for real-time updates to DayScholar screen
   final ValueNotifier<List<Map<String, dynamic>>> _dayRowsNotifier =
@@ -1228,8 +1248,9 @@ class _HomeScreenState extends State<HomeScreen> {
           'receivedAt': _shortDateTime(DateTime.now()),
         };
       }
-      if (src.containsKey('value') && src['value'] is String)
+      if (src.containsKey('value') && src['value'] is String) {
         s = src['value'] as String;
+      }
     }
 
     if (s == null) return null;

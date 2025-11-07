@@ -1,8 +1,10 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
 class LeaveApplicationsScreen extends StatelessWidget {
-  final List<Map<String, dynamic>> applications;
-  const LeaveApplicationsScreen({super.key, required this.applications});
+  // Changed from List to ValueListenable
+  final ValueListenable<List<Map<String, dynamic>>> applicationsListenable;
+  const LeaveApplicationsScreen({super.key, required this.applicationsListenable});
 
   String _first(Map<String, dynamic> a, List<String> keys) {
     for (final k in keys) {
@@ -17,21 +19,14 @@ class LeaveApplicationsScreen extends StatelessWidget {
   bool _isLeave(Map<String, dynamic> a) {
     final type = _first(a, ['type', 'Type']).toLowerCase();
     if (type.contains('leave')) return true;
-    final hasLeaving = a.keys.any(
-      (k) => k.toString().toLowerCase().contains('leaving'),
-    );
-    final hasReturning = a.keys.any(
-      (k) => k.toString().toLowerCase().contains('returning'),
-    );
+    final hasLeaving = a.keys.any((k) => k.toString().toLowerCase().contains('leaving'));
+    final hasReturning = a.keys.any((k) => k.toString().toLowerCase().contains('returning'));
     return hasLeaving || hasReturning;
   }
 
   String _formatDateTime(String? s) {
     if (s == null) return '';
-    final re = RegExp(
-      r'(\d{1,2}[\/\-]\d{1,2}[\/\-]\d{4})\s*(?:at\s*)?(\d{1,2}:\d{2})?',
-      caseSensitive: false,
-    );
+    final re = RegExp(r'(\d{1,2}[\/\-]\d{1,2}[\/\-]\d{4})\s*(?:at\s*)?(\d{1,2}:\d{2})?', caseSensitive: false);
     final m = re.firstMatch(s);
     if (m != null) {
       final date = m.group(1)!;
@@ -43,103 +38,56 @@ class LeaveApplicationsScreen extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final leaves = applications.where((a) => _isLeave(a)).toList();
-
-    final columns = <String>[
-      'Name',
-      'Roll Number',
-      'Phone Number',
-      'Leaving',
-      'Returning',
-      'Duration',
-      'Address',
-      'Received',
-    ];
+    final columns = <String>['Name', 'Roll Number', 'Phone Number', 'Leaving', 'Returning', 'Duration', 'Address', 'Received'];
 
     return Scaffold(
       appBar: AppBar(title: const Text('Leave Applications')),
       body: Padding(
         padding: const EdgeInsets.all(12.0),
-        child: leaves.isEmpty
-            ? const Center(child: Text('No leave applications received yet.'))
-            : SingleChildScrollView(
-                scrollDirection: Axis.horizontal,
-                child: ConstrainedBox(
-                  constraints: const BoxConstraints(minWidth: 900),
-                  child: SingleChildScrollView(
-                    child: DataTable(
-                      columnSpacing: 24,
-                      headingRowHeight: 56,
-                      dataRowHeight: 56,
-                      columns: columns
-                          .map(
-                            (c) => DataColumn(
-                              label: Text(
-                                c,
-                                style: const TextStyle(
-                                  fontWeight: FontWeight.w600,
-                                ),
-                              ),
-                            ),
-                          )
-                          .toList(),
-                      rows: leaves.map((a) {
-                        final name = _first(a, [
-                          'name',
-                          'Name',
-                          'full name',
-                          'fullname',
-                        ]);
-                        final roll = _first(a, [
-                          'roll number',
-                          'Roll Number',
-                          'roll',
-                          'id',
-                          'Id',
-                        ]);
-                        final phone = _first(a, [
-                          'phone number',
-                          'Phone Number',
-                          'phone',
-                          'mobile',
-                        ]);
-                        final leaving = _formatDateTime(
-                          _first(a, ['leaving', 'Leaving', 'from']),
-                        );
-                        final returning = _formatDateTime(
-                          _first(a, ['returning', 'Returning', 'to']),
-                        );
-                        final duration = _first(a, ['duration', 'Duration']);
-                        final address = _first(a, [
-                          'address',
-                          'Address',
-                          'location',
-                          'Location',
-                        ]);
-                        final received = _first(a, [
-                          'receivedAt',
-                          'received_at',
-                          'received',
-                        ]);
+        // Added ValueListenableBuilder here
+        child: ValueListenableBuilder<List<Map<String, dynamic>>>(
+          valueListenable: applicationsListenable,
+          builder: (context, allApplications, _) {
+            final leaves = allApplications.where((a) => _isLeave(a)).toList();
 
-                        return DataRow(
-                          cells: [
-                            DataCell(SelectableText(name)),
-                            DataCell(SelectableText(roll)),
-                            DataCell(SelectableText(phone)),
-                            DataCell(SelectableText(leaving)),
-                            DataCell(SelectableText(returning)),
-                            DataCell(SelectableText(duration)),
-                            DataCell(SelectableText(address)),
-                            DataCell(SelectableText(received)),
-                          ],
-                        );
-                      }).toList(),
-                    ),
+            if (leaves.isEmpty) {
+              return const Center(child: Text('No leave applications received yet.'));
+            }
+
+            return SingleChildScrollView(
+              scrollDirection: Axis.horizontal,
+              child: ConstrainedBox(
+                constraints: const BoxConstraints(minWidth: 900),
+                child: SingleChildScrollView(
+                  child: DataTable(
+                    columnSpacing: 24,
+                    headingRowHeight: 56,
+                    dataRowHeight: 56,
+                    columns: columns.map((c) => DataColumn(
+                          label: Text(c, style: const TextStyle(fontWeight: FontWeight.w600)),
+                        )).toList(),
+                    rows: leaves.map((a) {
+                      return DataRow(
+                        cells: [
+                          DataCell(SelectableText(_first(a, ['name', 'Name', 'full name', 'fullname']))),
+                          DataCell(SelectableText(_first(a, ['roll number', 'Roll Number', 'roll', 'id', 'Id']))),
+                          DataCell(SelectableText(_first(a, ['phone number', 'Phone Number', 'phone', 'mobile']))),
+                          DataCell(SelectableText(_formatDateTime(_first(a, ['leaving', 'Leaving', 'from'])))),
+                          DataCell(SelectableText(_formatDateTime(_first(a, ['returning', 'Returning', 'to'])))),
+                          DataCell(SelectableText(_first(a, ['duration', 'Duration']))),
+                          DataCell(SelectableText(_first(a, ['address', 'Address', 'location', 'Location']))),
+                          DataCell(SelectableText(_first(a, ['receivedAt', 'received_at', 'received']))),
+                        ],
+                      );
+                    }).toList(),
                   ),
                 ),
               ),
+            );
+          },
+        ),
       ),
     );
+
   }
 }

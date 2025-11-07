@@ -76,8 +76,6 @@ class _HomeScreenState extends State<HomeScreen> {
     _portController.dispose();
     _stopAdbMonitor();
     _stopAdbWatcher();
-    _dayRowsNotifier.dispose();
-    _leaveAppsNotifier.dispose();
     super.dispose();
   }
 
@@ -410,7 +408,11 @@ class _HomeScreenState extends State<HomeScreen> {
             InkWell(
               onTap: () {
                 Navigator.of(context).push(
-                  MaterialPageRoute(builder: (_) => DayScholarScreen(applicationsListenable: _dayRowsNotifier)),
+                  MaterialPageRoute(
+                    builder: (_) => DayScholarScreen(
+                      applicationsListenable: _dayRowsNotifier,
+                    ),
+                  ),
                 );
               },
               child: _dashCard('Day scholar', 'Open'),
@@ -422,7 +424,7 @@ class _HomeScreenState extends State<HomeScreen> {
                 Navigator.of(context).push(
                   MaterialPageRoute(
                     builder: (_) =>
-                        LeaveApplicationsScreen(applicationsNotifier: _leaveAppsNotifier),
+                        LeaveApplicationsScreen(applications: _leaveApps),
                   ),
                 );
               },
@@ -527,7 +529,7 @@ class _HomeScreenState extends State<HomeScreen> {
                 Navigator.of(context).push(
                   MaterialPageRoute(
                     builder: (_) =>
-                        LeaveApplicationsScreen(applicationsNotifier: _leaveAppsNotifier),
+                        LeaveApplicationsScreen(applications: _leaveApps),
                   ),
                 );
               },
@@ -558,7 +560,10 @@ class _HomeScreenState extends State<HomeScreen> {
                 Navigator.of(context).pop();
                 Navigator.of(context).push(
                   MaterialPageRoute(
-                    builder: (_) => DayScholarScreen(applicationsListenable: _dayRowsNotifier)),
+                    builder: (_) => DayScholarScreen(
+                      applicationsListenable: _dayRowsNotifier,
+                    ),
+                  ),
                 );
               },
             ),
@@ -1025,39 +1030,113 @@ class _HomeScreenState extends State<HomeScreen> {
   // Route incoming raw map/text by its Type key.
   // Returns true if routed (so caller doesn't add a generic row).
   bool _routeByType(Map<String, dynamic> raw) {
-    final type = (raw['type'] ?? raw['Type'] ?? '').toString().toLowerCase();
-    if (type.contains('leave')) {
-      final normalized = _tryParseLeaveApplication(raw) ?? raw;
-      _insertOrUpdateRow(_leaveApps, normalized);
+    // try direct keys first
+    String? type = _firstString(raw, ['type', 'Type']);
+    final kv = _parseKeyValueBlock(raw);
+    type ??= kv['type'];
+    if (type == null) return false;
+    final t = type.toLowerCase();
+
+    // prefer possible value string for leave parsing
+    final possibleValue = raw['value'] ?? kv['value'];
+
+    // Leave
+    if (t.contains('leave')) {
+      final pl =
+          _tryParseLeaveApplication(raw) ??
+          _tryParseLeaveApplication(possibleValue);
+      if (pl != null) {
+        setState(() => _leaveApps.add(pl));
+        return true;
+      }
+      return false;
+    }
+
+    // Hostel
+    if (t.contains('hostel') || t.contains('hosteller')) {
+      final name = _firstString(raw, ['name', 'Name']) ?? kv['name'];
+      final id =
+          _firstString(raw, ['id', 'Id', 'roll', 'roll_no', 'rollno']) ??
+          kv['roll number'] ??
+          kv['roll'];
+      final phone =
+          _firstString(raw, ['phone', 'Phone', 'mobile']) ??
+          kv['phone number'] ??
+          kv['phone'];
+      final location =
+          _firstString(raw, ['location', 'Location', 'address']) ??
+          kv['location'];
+      final minimal = <String, dynamic>{
+        'name': name,
+        'id': id,
+        'phone': phone,
+        'location': location,
+      };
+      _insertOrUpdateRow(_rows, minimal);
       return true;
     }
 
-    // other routing...
+    // Day scholar
+    if (t.contains('day') || t.contains('scholar')) {
+      final name = _firstString(raw, ['name', 'Name']) ?? kv['name'];
+      final id =
+          _firstString(raw, ['id', 'Id', 'roll', 'roll_no', 'rollno']) ??
+          kv['roll number'] ??
+          kv['roll'];
+      final phone =
+          _firstString(raw, ['phone', 'Phone', 'mobile']) ??
+          kv['phone number'] ??
+          kv['phone'];
+      final location =
+          _firstString(raw, ['location', 'Location', 'address']) ??
+          kv['location'];
+      final minimal = <String, dynamic>{
+        'name': name,
+        'id': id,
+        'phone': phone,
+        'location': location,
+      };
+      _insertOrUpdateDayRow(_dayRows, minimal);
+      return true;
+    }
+
     return false;
   }
 
   // per-table storage (hostel/day/leave)
   final List<Map<String, dynamic>> _dayRows = [];
-  // leave applications storage + notifier (fixes missing _leaveApps getter error)
   final List<Map<String, dynamic>> _leaveApps = [];
-  final ValueNotifier<List<Map<String, dynamic>>> _leaveAppsNotifier = ValueNotifier(const []);
-  // notifier for real-time DayScholar updates
-  final ValueNotifier<List<Map<String, dynamic>>> _dayRowsNotifier = ValueNotifier(const []);
+
+  // notifier for real-time updates to DayScholar screen
+  final ValueNotifier<List<Map<String, dynamic>>> _dayRowsNotifier =
+      ValueNotifier(const []);
 
   // Insert/update day-scholar rows:
   // - first scan for a person -> set 'intime'
   // - next scan for same person -> set 'outtime'
   // - if both already present, start a new session (new row with intime)
-  void _insertOrUpdateDayRow(List<Map<String, dynamic>> target, Map<String, dynamic> fields) {
+  void _insertOrUpdateDayRow(
+    List<Map<String, dynamic>> target,
+    Map<String, dynamic> fields,
+  ) {
     final String? name = fields['name'] as String?;
     final String? id = fields['id'] as String?;
     final String? phone = fields['phone'] as String?;
 
     for (var i = target.length - 1; i >= 0; i--) {
       final r = target[i];
-      final sameById = id != null && r['id'] != null && r['id'].toString() == id;
-      final sameByPhone = (id == null || !sameById) && phone != null && r['phone'] != null && r['phone'].toString() == phone;
-      final sameByName = (id == null && phone == null) && name != null && r['name'] != null && r['name'].toString() == name;
+      final sameById =
+          id != null && r['id'] != null && r['id'].toString() == id;
+      final sameByPhone =
+          (id == null || !sameById) &&
+          phone != null &&
+          r['phone'] != null &&
+          r['phone'].toString() == phone;
+      final sameByName =
+          (id == null && phone == null) &&
+          name != null &&
+          r['name'] != null &&
+          r['name'].toString() == name;
 
       if (sameById || sameByPhone || sameByName) {
         final prevIn = (r['intime'] as String?) ?? '';
@@ -1065,20 +1144,25 @@ class _HomeScreenState extends State<HomeScreen> {
         final now = _shortDateTime(DateTime.now());
 
         if (prevIn.trim().isEmpty) {
+          // first event -> set intime
           setState(() {
             r['intime'] = now;
             target[i] = Map<String, dynamic>.from(r);
-            _log('DayScholar: set intime to $now for id=${id ?? phone ?? name}');
+            _log(
+              'DayScholar: set intime to $now for id=${id ?? phone ?? name}',
+            );
           });
-          _dayRowsNotifier.value = List<Map<String, dynamic>>.from(_dayRows);
         } else if (prevOut.trim().isEmpty) {
+          // intime exists and outtime empty -> set outtime
           setState(() {
             r['outtime'] = now;
             target[i] = Map<String, dynamic>.from(r);
-            _log('DayScholar: set outtime to $now for id=${id ?? phone ?? name}');
+            _log(
+              'DayScholar: set outtime to $now for id=${id ?? phone ?? name}',
+            );
           });
-          _dayRowsNotifier.value = List<Map<String, dynamic>>.from(_dayRows);
         } else {
+          // both intime+outtime present -> start a new session with new intime
           final newRow = <String, dynamic>{
             'name': r['name'],
             'id': r['id'],
@@ -1090,14 +1174,16 @@ class _HomeScreenState extends State<HomeScreen> {
           };
           setState(() {
             target.add(newRow);
-            _log('DayScholar: started new session (intime=$now) for id=${id ?? phone ?? name}');
+            _log(
+              'DayScholar: started new session (intime=$now) for id=${id ?? phone ?? name}',
+            );
           });
-          _dayRowsNotifier.value = List<Map<String, dynamic>>.from(_dayRows);
         }
         return;
       }
     }
 
+    // not found -> add with intime set
     final normalized = <String, dynamic>{
       'name': name,
       'id': id,
@@ -1111,6 +1197,7 @@ class _HomeScreenState extends State<HomeScreen> {
       target.add(normalized);
       _log('DayScholar: added new entry for id=${id ?? phone ?? name}');
     });
+    // notify listeners with a defensive copy
     _dayRowsNotifier.value = List<Map<String, dynamic>>.from(_dayRows);
   }
 
@@ -1123,8 +1210,12 @@ class _HomeScreenState extends State<HomeScreen> {
     } else if (src is Map) {
       // lowercase keys
       final low = <String, String>{};
-      src.forEach((k, v) => low[k.toString().toLowerCase()] = v?.toString() ?? '');
-      if ((low['type'] ?? '').toLowerCase().contains('leave') || low.containsKey('leaving') || low.containsKey('returning')) {
+      src.forEach(
+        (k, v) => low[k.toString().toLowerCase()] = v?.toString() ?? '',
+      );
+      if ((low['type'] ?? '').toLowerCase().contains('leave') ||
+          low.containsKey('leaving') ||
+          low.containsKey('returning')) {
         return {
           'type': 'Leave',
           'name': low['name'] ?? '',
@@ -1137,7 +1228,8 @@ class _HomeScreenState extends State<HomeScreen> {
           'receivedAt': _shortDateTime(DateTime.now()),
         };
       }
-      if (src.containsKey('value') && src['value'] is String) s = src['value'] as String;
+      if (src.containsKey('value') && src['value'] is String)
+        s = src['value'] as String;
     }
 
     if (s == null) return null;
@@ -1150,7 +1242,9 @@ class _HomeScreenState extends State<HomeScreen> {
     if (map.isEmpty) return null;
 
     final type = map['type'] ?? '';
-    if (type.toLowerCase().contains('leave') || map.containsKey('leaving') || map.containsKey('returning')) {
+    if (type.toLowerCase().contains('leave') ||
+        map.containsKey('leaving') ||
+        map.containsKey('returning')) {
       return {
         'type': 'Leave',
         'name': map['name'] ?? '',
@@ -1167,61 +1261,54 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   // Insert or update into target list (dedupe by id -> phone -> name).
-  void _insertOrUpdateRow(List<Map<String, dynamic>> target, Map<String, dynamic> fields) {
-    // basic dedupe/update: id -> phone -> name (case-insensitive)
-    int idx = -1;
-    final idVal = fields['id'] ?? fields['Id'];
-    final phoneVal = fields['phone'] ?? fields['Phone'] ?? fields['mobile'];
-    final nameVal = (fields['name'] ?? fields['Name'])?.toString().toLowerCase();
+  void _insertOrUpdateRow(
+    List<Map<String, dynamic>> target,
+    Map<String, dynamic> fields,
+  ) {
+    final name = fields['name'] as String?;
+    final id = fields['id'] as String?;
+    final phone = fields['phone'] as String?;
 
-    if (idVal != null) {
-      idx = target.indexWhere((r) => (r['id'] ?? r['Id']) == idVal);
-    }
-    if (idx == -1 && phoneVal != null) {
-      idx = target.indexWhere((r) {
-        final p = r['phone'] ?? r['Phone'] ?? r['mobile'];
-        return p != null && p == phoneVal;
-      });
-    }
-    if (idx == -1 && nameVal != null) {
-      idx = target.indexWhere((r) {
-        final n = (r['name'] ?? r['Name'])?.toString().toLowerCase();
-        return n != null && n == nameVal;
-      });
-    }
-
-    if (idx != -1) {
-      // merge fields into existing row
-      target[idx] = {...target[idx], ...fields};
-    } else {
-      // new entry
-      final entry = {...fields};
-      entry['receivedAt'] = DateTime.now().toIso8601String();
-      target.insert(0, entry);
-    }
-
-    // publish notifier changes for listeners
-    if (identical(target, _leaveApps)) {
-      _leaveAppsNotifier.value = List<Map<String, dynamic>>.from(_leaveApps);
-    }
-    if (identical(target, _dayRows)) {
-      _dayRowsNotifier.value = List<Map<String, dynamic>>.from(_dayRows);
+    for (var i = target.length - 1; i >= 0; i--) {
+      final r = target[i];
+      final sameById =
+          id != null && r['id'] != null && r['id'].toString() == id;
+      final sameByPhone =
+          (id == null || !sameById) &&
+          phone != null &&
+          r['phone'] != null &&
+          r['phone'].toString() == phone;
+      final sameByName =
+          (id == null && phone == null) &&
+          name != null &&
+          r['name'] != null &&
+          r['name'].toString() == name;
+      if (sameById || sameByPhone || sameByName) {
+        final prevIn = r['intime'] as String?;
+        if (prevIn == null || prevIn.toString().trim().isEmpty) {
+          final now = _shortDateTime(DateTime.now());
+          setState(() {
+            r['intime'] = now;
+            target[i] = Map<String, dynamic>.from(r);
+            _log(
+              'Updated existing row intime to $now for id=${id ?? phone ?? name}',
+            );
+          });
+        }
+        return;
+      }
     }
 
-    // ensure UI refresh
-    if (mounted) setState(() {});
-  }
-
-  // example nav button or list tile that opens leave screen
-  void _openLeaveScreen() {
-    Navigator.push(
-      context,
-      MaterialPageRoute(
-        builder: (_) => LeaveApplicationsScreen(
-          applicationsNotifier: _leaveAppsNotifier,
-        ),
-      ),
-    );
+    final normalized = <String, dynamic>{
+      'name': name,
+      'id': id,
+      'phone': phone,
+      'location': fields['location'],
+      'intime': null,
+      'outtime': _shortDateTime(DateTime.now()),
+      'security': null,
+    };
+    setState(() => target.add(normalized));
   }
 }
 // git push

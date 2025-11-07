@@ -1172,6 +1172,8 @@ class _HomeScreenState extends State<HomeScreen> {
               'DayScholar: set intime to $now for id=${id ?? phone ?? name}',
             );
           });
+          // notify listeners so DayScholar screen updates immediately
+          _dayRowsNotifier.value = List<Map<String, dynamic>>.from(_dayRows);
         } else if (prevOut.trim().isEmpty) {
           // intime exists and outtime empty -> set outtime
           setState(() {
@@ -1181,6 +1183,8 @@ class _HomeScreenState extends State<HomeScreen> {
               'DayScholar: set outtime to $now for id=${id ?? phone ?? name}',
             );
           });
+          // notify listeners so DayScholar screen updates immediately
+          _dayRowsNotifier.value = List<Map<String, dynamic>>.from(_dayRows);
         } else {
           // both intime+outtime present -> start a new session with new intime
           final newRow = <String, dynamic>{
@@ -1198,6 +1202,8 @@ class _HomeScreenState extends State<HomeScreen> {
               'DayScholar: started new session (intime=$now) for id=${id ?? phone ?? name}',
             );
           });
+          // notify listeners so DayScholar screen updates immediately
+          _dayRowsNotifier.value = List<Map<String, dynamic>>.from(_dayRows);
         }
         return;
       }

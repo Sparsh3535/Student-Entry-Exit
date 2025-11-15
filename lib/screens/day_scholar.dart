@@ -122,15 +122,70 @@ class DayScholarScreen extends StatelessWidget {
                             'outTime',
                           ]);
                           final security = _cell(r, ['security', 'Security']);
+                          String _chipLabel() {
+                            // Only show explicit security status when provided.
+                            return security.isNotEmpty ? security : '';
+                          }
+
+                          Color _chipColor() {
+                            final s = security.toLowerCase();
+                            if (s.contains('checked'))
+                              return Colors.green.shade600;
+                            if (s.contains('late'))
+                              return Colors.amber.shade700;
+                            if (s.contains('unverified') || s.contains('un'))
+                              return Colors.red.shade400;
+                            return Colors.grey.shade400;
+                          }
+
+                          Widget intimeWidget() {
+                            if (intime.isEmpty) return const SelectableText('');
+                            return SelectableText(
+                              intime,
+                              style: const TextStyle(
+                                color: Color(0xFF2E7D32),
+                                fontWeight: FontWeight.w600,
+                              ),
+                            );
+                          }
+
+                          Widget outtimeWidget() {
+                            if (outtime.isEmpty)
+                              return const Text(
+                                '\u2014',
+                                style: TextStyle(color: Colors.black45),
+                              );
+                            return Text(
+                              outtime,
+                              style: const TextStyle(
+                                color: Color(0xFFD32F2F),
+                                fontWeight: FontWeight.w600,
+                              ),
+                            );
+                          }
+
+                          final chipLabel = _chipLabel();
                           return DataRow(
                             cells: [
                               DataCell(SelectableText(name)),
                               DataCell(SelectableText(id)),
                               DataCell(SelectableText(phone)),
                               DataCell(SelectableText(location)),
-                              DataCell(SelectableText(intime)),
-                              DataCell(SelectableText(outtime)),
-                              DataCell(SelectableText(security)),
+                              DataCell(intimeWidget()),
+                              DataCell(outtimeWidget()),
+                              DataCell(
+                                chipLabel.isEmpty
+                                    ? const SizedBox.shrink()
+                                    : Chip(
+                                        label: Text(
+                                          chipLabel,
+                                          style: const TextStyle(
+                                            color: Colors.white,
+                                          ),
+                                        ),
+                                        backgroundColor: _chipColor(),
+                                      ),
+                              ),
                             ],
                           );
                         }).toList(),

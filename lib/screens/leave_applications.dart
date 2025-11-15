@@ -97,74 +97,105 @@ class LeaveApplicationsScreen extends StatelessWidget {
                         )
                         .toList(),
                     rows: leaves.map((a) {
+                      final name = _first(a, [
+                        'name',
+                        'Name',
+                        'full name',
+                        'fullname',
+                      ]);
+                      final roll = _first(a, [
+                        'roll number',
+                        'Roll Number',
+                        'roll',
+                        'id',
+                        'Id',
+                      ]);
+                      final phone = _first(a, [
+                        'phone number',
+                        'Phone Number',
+                        'phone',
+                        'mobile',
+                      ]);
+                      final leaving = _formatDateTime(
+                        _first(a, ['leaving', 'Leaving', 'from']),
+                      );
+                      final returning = _formatDateTime(
+                        _first(a, ['returning', 'Returning', 'to']),
+                      );
+                      final duration = _first(a, ['duration', 'Duration']);
+                      final address = _first(a, [
+                        'address',
+                        'Address',
+                        'location',
+                        'Location',
+                      ]);
+                      final received = _first(a, [
+                        'receivedAt',
+                        'received_at',
+                        'received',
+                      ]);
+
+                      Widget leavingWidget() {
+                        if (leaving.isEmpty)
+                          return const Text(
+                            '\u2014',
+                            style: TextStyle(color: Colors.black45),
+                          );
+                        return SelectableText(
+                          leaving,
+                          style: const TextStyle(
+                            color: Color(0xFF2E7D32),
+                            fontWeight: FontWeight.w600,
+                          ),
+                        );
+                      }
+
+                      Widget returningWidget() {
+                        if (returning.isEmpty)
+                          return const Text(
+                            '\u2014',
+                            style: TextStyle(color: Colors.black45),
+                          );
+                        return Text(
+                          returning,
+                          style: const TextStyle(
+                            color: Color(0xFFD32F2F),
+                            fontWeight: FontWeight.w600,
+                          ),
+                        );
+                      }
+
+                      final statusLabel = duration.isNotEmpty
+                          ? 'Duration: $duration'
+                          : '';
+
                       return DataRow(
                         cells: [
+                          DataCell(SelectableText(name)),
+                          DataCell(SelectableText(roll)),
+                          DataCell(SelectableText(phone)),
+                          DataCell(leavingWidget()),
+                          DataCell(returningWidget()),
+                          DataCell(SelectableText(duration)),
+                          DataCell(SelectableText(address)),
                           DataCell(
-                            SelectableText(
-                              _first(a, [
-                                'name',
-                                'Name',
-                                'full name',
-                                'fullname',
-                              ]),
-                            ),
-                          ),
-                          DataCell(
-                            SelectableText(
-                              _first(a, [
-                                'roll number',
-                                'Roll Number',
-                                'roll',
-                                'id',
-                                'Id',
-                              ]),
-                            ),
-                          ),
-                          DataCell(
-                            SelectableText(
-                              _first(a, [
-                                'phone number',
-                                'Phone Number',
-                                'phone',
-                                'mobile',
-                              ]),
-                            ),
-                          ),
-                          DataCell(
-                            SelectableText(
-                              _formatDateTime(
-                                _first(a, ['leaving', 'Leaving', 'from']),
-                              ),
-                            ),
-                          ),
-                          DataCell(
-                            SelectableText(
-                              _formatDateTime(
-                                _first(a, ['returning', 'Returning', 'to']),
-                              ),
-                            ),
-                          ),
-                          DataCell(
-                            SelectableText(_first(a, ['duration', 'Duration'])),
-                          ),
-                          DataCell(
-                            SelectableText(
-                              _first(a, [
-                                'address',
-                                'Address',
-                                'location',
-                                'Location',
-                              ]),
-                            ),
-                          ),
-                          DataCell(
-                            SelectableText(
-                              _first(a, [
-                                'receivedAt',
-                                'received_at',
-                                'received',
-                              ]),
-                            ),
+                            statusLabel.isEmpty
+                                ? SelectableText(received)
+                                : Row(
+                                    children: [
+                                      SelectableText(received),
+                                      const SizedBox(width: 8),
+                                      Chip(
+                                        label: Text(
+                                          statusLabel,
+                                          style: const TextStyle(
+                                            color: Colors.white,
+                                          ),
+                                        ),
+                                        backgroundColor: Colors.amber.shade700,
+                                      ),
+                                    ],
+                                  ),
                           ),
                         ],
                       );

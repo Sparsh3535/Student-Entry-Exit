@@ -396,11 +396,80 @@ class _HomeScreenState extends State<HomeScreen> {
 
   List<DataRow> _buildRows() {
     return _rows.map((r) {
+      // helper to get string safely
+      String sval(dynamic v) => v == null ? '' : v.toString();
+
+      final name = sval(r['name']);
+      final id = sval(r['id']);
+      final phone = sval(r['phone']);
+      final location = sval(r['location']);
+      final intime = sval(r['intime']);
+      final outtime = sval(r['outtime']);
+      final security = sval(r['security']);
+
+      // security chip color resolution
+      Color _chipColor() {
+        final s = security.toLowerCase();
+        if (s.contains('checked')) return Colors.green.shade600;
+        if (s.contains('late')) return Colors.amber.shade700;
+        if (s.contains('unverified') || s.contains('un'))
+          return Colors.red.shade400;
+        // fallback based on presence: if intime present and outtime empty -> checked in
+        if (intime.isNotEmpty && outtime.isEmpty) return Colors.green.shade600;
+        return Colors.grey.shade400;
+      }
+
+      String _chipLabel() {
+        if (security.isNotEmpty) return security;
+        if (intime.isNotEmpty && outtime.isEmpty) return 'Checked In';
+        return '';
+      }
+
+      Widget intimeWidget() {
+        if (intime.isEmpty) return const SelectableText('');
+        return SelectableText(
+          intime,
+          style: const TextStyle(
+            color: Color(0xFF2E7D32),
+            fontWeight: FontWeight.w600,
+          ),
+        );
+      }
+
+      Widget outtimeWidget() {
+        if (outtime.isEmpty)
+          return const Text('\u2014', style: TextStyle(color: Colors.black45));
+        return Text(
+          outtime,
+          style: const TextStyle(
+            color: Color(0xFFD32F2F),
+            fontWeight: FontWeight.w600,
+          ),
+        );
+      }
+
+      final chipLabel = _chipLabel();
+
       return DataRow(
-        cells: _colKeys.map((k) {
-          final v = r[k];
-          return DataCell(SelectableText(v == null ? '' : v.toString()));
-        }).toList(),
+        cells: [
+          DataCell(SelectableText(name)),
+          DataCell(SelectableText(id)),
+          DataCell(SelectableText(phone)),
+          DataCell(SelectableText(location)),
+          DataCell(intimeWidget()),
+          DataCell(outtimeWidget()),
+          DataCell(
+            chipLabel.isEmpty
+                ? const SizedBox.shrink()
+                : Chip(
+                    label: Text(
+                      chipLabel,
+                      style: const TextStyle(color: Colors.white),
+                    ),
+                    backgroundColor: _chipColor(),
+                  ),
+          ),
+        ],
       );
     }).toList();
   }
@@ -1318,26 +1387,32 @@ class _HomeScreenState extends State<HomeScreen> {
         final now = _shortDateTime(DateTime.now());
 
         if (prevOut == null || prevOut.toString().trim().isEmpty) {
-          // first relevant scan -> set outtime
+          // first relevant scan -> set outtime; update location if provided
           setState(() {
             r['outtime'] = now;
+            final loc = fields['location'];
+            if (loc != null && loc.toString().trim().isNotEmpty)
+              r['location'] = loc;
             target[i] = Map<String, dynamic>.from(r);
             _log('Hostel: set outtime to $now for id=${id ?? phone ?? name}');
           });
         } else if (prevIn == null || prevIn.toString().trim().isEmpty) {
-          // outtime exists but intime empty -> set intime (return/enter)
+          // outtime exists but intime empty -> set intime (return/enter); update location
           setState(() {
             r['intime'] = now;
+            final loc = fields['location'];
+            if (loc != null && loc.toString().trim().isNotEmpty)
+              r['location'] = loc;
             target[i] = Map<String, dynamic>.from(r);
             _log('Hostel: set intime to $now for id=${id ?? phone ?? name}');
           });
         } else {
-          // both intime + outtime present -> start a new session with OUT filled first
+          // both intime + outtime present -> start a new session with OUT filled first, prefer incoming location
           final newRow = <String, dynamic>{
             'name': r['name'],
             'id': r['id'],
             'phone': r['phone'],
-            'location': r['location'],
+            'location': fields['location'] ?? r['location'],
             'intime': null,
             'outtime': now,
             'security': null,

@@ -1,6 +1,6 @@
 {
-    "name": "qr_scanner_desktop",
-    "short_name": "qr_scanner_desktop",
+        "name": "Smart Entry",
+        "short_name": "Smart Entry",
     "start_url": ".",
     "display": "standalone",
     "background_color": "#0175C2",

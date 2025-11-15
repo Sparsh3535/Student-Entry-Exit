@@ -26,6 +26,8 @@ class _HomeScreenState extends State<HomeScreen> {
   final TextEditingController _portController = TextEditingController(
     text: '9000',
   );
+  // Optional in-memory override for the current security person's name.
+  String? _securityOverride;
 
   // ADB auto-reverse monitor — tries to run `adb reverse tcp:<port> tcp:<port>`
   // when an Android device is detected so you don't need to run adb manually.
@@ -515,6 +517,28 @@ class _HomeScreenState extends State<HomeScreen> {
               },
               child: _dashCard('Leave Applications', 'Open'),
             ),
+            const SizedBox(width: 12),
+            // Security login card — shows current security name in a dialog
+            InkWell(
+              onTap: () {
+                showDialog(
+                  context: context,
+                  builder: (ctx) => AlertDialog(
+                    title: const Text('Security login'),
+                    content: Text(
+                      'Current security: ${_currentSecurityName()}',
+                    ),
+                    actions: [
+                      TextButton(
+                        onPressed: () => Navigator.of(ctx).pop(),
+                        child: const Text('Close'),
+                      ),
+                    ],
+                  ),
+                );
+              },
+              child: _dashCard('Security login', 'View'),
+            ),
           ],
         ),
         const SizedBox(height: 12),
@@ -548,6 +572,52 @@ class _HomeScreenState extends State<HomeScreen> {
                       onPressed: _clear,
                     ),
                   ],
+                ),
+              ],
+            ),
+          ),
+        ),
+        const SizedBox(height: 12),
+        // SECURITY LOGIN SECTION - visible card so it's not hidden inside the
+        // dashboard row. Shows the current security person and provides a
+        // button to view/change (view opens dialog). UI-only; does not
+        // persist changes beyond runtime.
+        Card(
+          color: Colors.grey.shade50,
+          child: Padding(
+            padding: const EdgeInsets.all(12.0),
+            child: Row(
+              children: [
+                const Expanded(
+                  child: Text(
+                    'Security login',
+                    style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
+                  ),
+                ),
+                Text(
+                  _currentSecurityName(),
+                  style: const TextStyle(fontSize: 14, color: Colors.black87),
+                ),
+                const SizedBox(width: 12),
+                ElevatedButton(
+                  onPressed: () {
+                    showDialog(
+                      context: context,
+                      builder: (ctx) => AlertDialog(
+                        title: const Text('Security login'),
+                        content: Text(
+                          'Current security: ${_currentSecurityName()}',
+                        ),
+                        actions: [
+                          TextButton(
+                            onPressed: () => Navigator.of(ctx).pop(),
+                            child: const Text('Close'),
+                          ),
+                        ],
+                      ),
+                    );
+                  },
+                  child: const Text('View'),
                 ),
               ],
             ),
@@ -649,6 +719,42 @@ class _HomeScreenState extends State<HomeScreen> {
                     builder: (_) => DayScholarScreen(
                       applicationsListenable: _dayRowsNotifier,
                     ),
+                  ),
+                );
+              },
+            ),
+            ListTile(
+              leading: const Icon(Icons.lock),
+              title: const Text('Security login'),
+              onTap: () {
+                Navigator.of(context).pop();
+                // show editable dialog to set security name (in-memory)
+                final ctl = TextEditingController(text: _currentSecurityName());
+                showDialog(
+                  context: context,
+                  builder: (ctx) => AlertDialog(
+                    title: const Text('Security login'),
+                    content: TextField(
+                      controller: ctl,
+                      decoration: const InputDecoration(
+                        labelText: 'Security name',
+                      ),
+                    ),
+                    actions: [
+                      TextButton(
+                        onPressed: () => Navigator.of(ctx).pop(),
+                        child: const Text('Cancel'),
+                      ),
+                      ElevatedButton(
+                        onPressed: () {
+                          setState(() {
+                            _securityOverride = ctl.text.trim();
+                          });
+                          Navigator.of(ctx).pop();
+                        },
+                        child: const Text('Save'),
+                      ),
+                    ],
                   ),
                 );
               },
@@ -782,10 +888,18 @@ class _HomeScreenState extends State<HomeScreen> {
                     child: Builder(
                       builder: (ctx) {
                         final screenWidth = MediaQuery.of(ctx).size.width - 48;
-                        final minW = screenWidth > 900.0 ? screenWidth : 900.0;
+                        // Use available screen width as the table min width so the
+                        // table does not exceed the viewport and require extra
+                        // horizontal scrolling. Keep a small minimum so very
+                        // narrow screens still render reasonably.
+                        final minW = screenWidth;
                         final colCount = _colKeys.length;
-                        final columnSpacing =
-                            (minW / math.max(1, colCount).toDouble()) * 0.9;
+                        // Slightly reduce column spacing so more columns fit on
+                        // typical screens while keeping the layout readable.
+                        final columnSpacing = math.max(
+                          12.0,
+                          (minW / math.max(1, colCount).toDouble()) * 0.7,
+                        );
                         return ConstrainedBox(
                           constraints: BoxConstraints(minWidth: minW),
                           child: SingleChildScrollView(
@@ -898,10 +1012,64 @@ class _HomeScreenState extends State<HomeScreen> {
           children: [
             Expanded(child: _buildMainContent()),
             const SizedBox(height: 8),
+            // Security card: shows the current security person's name (read-only UI)
+            Card(
+              child: Padding(
+                padding: const EdgeInsets.symmetric(
+                  vertical: 12,
+                  horizontal: 16,
+                ),
+                child: Row(
+                  children: [
+                    const Text(
+                      'Security',
+                      style: TextStyle(
+                        fontWeight: FontWeight.bold,
+                        fontSize: 14,
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Text(
+                        _currentSecurityName(),
+                        style: const TextStyle(
+                          fontSize: 14,
+                          color: Colors.black87,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
           ],
         ),
       ),
     );
+  }
+
+  // Determine the current security person's name from recent rows.
+  // Scans hostel rows then dayRows for the most recent non-empty 'security' value.
+  String _currentSecurityName() {
+    // If user set an explicit override via the Security login, prefer it.
+    if (_securityOverride != null && _securityOverride!.trim().isNotEmpty) {
+      return _securityOverride!.trim();
+    }
+    for (var i = _rows.length - 1; i >= 0; i--) {
+      final s = _rows[i]['security'];
+      if (s != null) {
+        final ss = s.toString().trim();
+        if (ss.isNotEmpty) return ss;
+      }
+    }
+    for (var i = _dayRows.length - 1; i >= 0; i--) {
+      final s = _dayRows[i]['security'];
+      if (s != null) {
+        final ss = s.toString().trim();
+        if (ss.isNotEmpty) return ss;
+      }
+    }
+    return 'Unknown';
   }
 
   void _startAdbMonitor() {

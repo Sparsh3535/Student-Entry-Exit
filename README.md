@@ -1,4 +1,4 @@
-# qr_scanner_desktop
+# Smart Entry
 
 A new Flutter project.
 

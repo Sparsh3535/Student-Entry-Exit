@@ -38,10 +38,15 @@ class DayScholarScreen extends StatelessWidget {
                   child: Builder(
                     builder: (ctx) {
                       final screenWidth = MediaQuery.of(ctx).size.width - 48;
-                      final minW = screenWidth > 900.0 ? screenWidth : 900.0;
+                      // Keep table width within the available viewport so the
+                      // right-most (Security) column is visible without
+                      // unnecessary horizontal scrolling on normal screens.
+                      final minW = screenWidth;
                       final colCount = 7; // fixed columns in this table
-                      final columnSpacing =
-                          (minW / math.max(1, colCount).toDouble()) * 0.9;
+                      final columnSpacing = math.max(
+                        12.0,
+                        (minW / math.max(1, colCount).toDouble()) * 0.7,
+                      );
                       return ConstrainedBox(
                         constraints: BoxConstraints(minWidth: minW),
                         child: SingleChildScrollView(

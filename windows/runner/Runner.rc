@@ -90,12 +90,12 @@ BEGIN
         BLOCK "040904e4"
         BEGIN
             VALUE "CompanyName", "com.example" "\0"
-            VALUE "FileDescription", "qr_scanner_desktop" "\0"
+            VALUE "FileDescription", "Smart Entry" "\0"
             VALUE "FileVersion", VERSION_AS_STRING "\0"
-            VALUE "InternalName", "qr_scanner_desktop" "\0"
+            VALUE "InternalName", "smart_entry" "\0"
             VALUE "LegalCopyright", "Copyright (C) 2025 com.example. All rights reserved." "\0"
-            VALUE "OriginalFilename", "qr_scanner_desktop.exe" "\0"
-            VALUE "ProductName", "qr_scanner_desktop" "\0"
+            VALUE "OriginalFilename", "smart_entry.exe" "\0"
+            VALUE "ProductName", "Smart Entry" "\0"
             VALUE "ProductVersion", VERSION_AS_STRING "\0"
         END
     END

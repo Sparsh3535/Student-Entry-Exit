@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -398,6 +399,7 @@ class _HomeScreenState extends State<HomeScreen> {
     return _rows.map((r) {
       // helper to get string safely
       String sval(dynamic v) => v == null ? '' : v.toString();
+      const cellStyle = TextStyle(fontSize: 14);
 
       final name = sval(r['name']);
       final id = sval(r['id']);
@@ -408,18 +410,19 @@ class _HomeScreenState extends State<HomeScreen> {
       final security = sval(r['security']);
 
       // security chip color resolution
-      Color _chipColor() {
+      Color chipColor() {
         final s = security.toLowerCase();
         if (s.contains('checked')) return Colors.green.shade600;
         if (s.contains('late')) return Colors.amber.shade700;
-        if (s.contains('unverified') || s.contains('un'))
+        if (s.contains('unverified') || s.contains('un')) {
           return Colors.red.shade400;
+        }
         // fallback based on presence: if intime present and outtime empty -> checked in
         if (intime.isNotEmpty && outtime.isEmpty) return Colors.green.shade600;
         return Colors.grey.shade400;
       }
 
-      String _chipLabel() {
+      String chipLabel0() {
         if (security.isNotEmpty) return security;
         if (intime.isNotEmpty && outtime.isEmpty) return 'Checked In';
         return '';
@@ -432,30 +435,33 @@ class _HomeScreenState extends State<HomeScreen> {
           style: const TextStyle(
             color: Color(0xFF2E7D32),
             fontWeight: FontWeight.w600,
+            fontSize: 14,
           ),
         );
       }
 
       Widget outtimeWidget() {
-        if (outtime.isEmpty)
+        if (outtime.isEmpty) {
           return const Text('\u2014', style: TextStyle(color: Colors.black45));
+        }
         return Text(
           outtime,
           style: const TextStyle(
             color: Color(0xFFD32F2F),
             fontWeight: FontWeight.w600,
+            fontSize: 14,
           ),
         );
       }
 
-      final chipLabel = _chipLabel();
+      final chipLabel = chipLabel0();
 
       return DataRow(
         cells: [
-          DataCell(SelectableText(name)),
-          DataCell(SelectableText(id)),
-          DataCell(SelectableText(phone)),
-          DataCell(SelectableText(location)),
+          DataCell(SelectableText(name, style: cellStyle)),
+          DataCell(SelectableText(id, style: cellStyle)),
+          DataCell(SelectableText(phone, style: cellStyle)),
+          DataCell(SelectableText(location, style: cellStyle)),
           DataCell(intimeWidget()),
           DataCell(outtimeWidget()),
           DataCell(
@@ -464,9 +470,9 @@ class _HomeScreenState extends State<HomeScreen> {
                 : Chip(
                     label: Text(
                       chipLabel,
-                      style: const TextStyle(color: Colors.white),
+                      style: const TextStyle(color: Colors.white, fontSize: 13),
                     ),
-                    backgroundColor: _chipColor(),
+                    backgroundColor: chipColor(),
                   ),
           ),
         ],
@@ -773,16 +779,26 @@ class _HomeScreenState extends State<HomeScreen> {
                   child: SingleChildScrollView(
                     controller: _hScroll,
                     scrollDirection: Axis.horizontal,
-                    child: ConstrainedBox(
-                      constraints: const BoxConstraints(minWidth: 900),
-                      child: SingleChildScrollView(
-                        child: DataTable(
-                          columns: _buildColumns(),
-                          rows: _buildRows(),
-                          dataRowHeight: 52,
-                          headingRowHeight: 56,
-                        ),
-                      ),
+                    child: Builder(
+                      builder: (ctx) {
+                        final screenWidth = MediaQuery.of(ctx).size.width - 48;
+                        final minW = screenWidth > 900.0 ? screenWidth : 900.0;
+                        final colCount = _colKeys.length;
+                        final columnSpacing =
+                            (minW / math.max(1, colCount).toDouble()) * 0.9;
+                        return ConstrainedBox(
+                          constraints: BoxConstraints(minWidth: minW),
+                          child: SingleChildScrollView(
+                            child: DataTable(
+                              columns: _buildColumns(),
+                              rows: _buildRows(),
+                              columnSpacing: columnSpacing,
+                              dataRowHeight: 64,
+                              headingRowHeight: 64,
+                            ),
+                          ),
+                        );
+                      },
                     ),
                   ),
                 ),
@@ -1391,8 +1407,9 @@ class _HomeScreenState extends State<HomeScreen> {
           setState(() {
             r['outtime'] = now;
             final loc = fields['location'];
-            if (loc != null && loc.toString().trim().isNotEmpty)
+            if (loc != null && loc.toString().trim().isNotEmpty) {
               r['location'] = loc;
+            }
             target[i] = Map<String, dynamic>.from(r);
             _log('Hostel: set outtime to $now for id=${id ?? phone ?? name}');
           });
@@ -1401,8 +1418,9 @@ class _HomeScreenState extends State<HomeScreen> {
           setState(() {
             r['intime'] = now;
             final loc = fields['location'];
-            if (loc != null && loc.toString().trim().isNotEmpty)
+            if (loc != null && loc.toString().trim().isNotEmpty) {
               r['location'] = loc;
+            }
             target[i] = Map<String, dynamic>.from(r);
             _log('Hostel: set intime to $now for id=${id ?? phone ?? name}');
           });

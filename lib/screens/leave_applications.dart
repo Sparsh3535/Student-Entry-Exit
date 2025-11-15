@@ -136,11 +136,12 @@ class LeaveApplicationsScreen extends StatelessWidget {
                       ]);
 
                       Widget leavingWidget() {
-                        if (leaving.isEmpty)
+                        if (leaving.isEmpty) {
                           return const Text(
                             '\u2014',
                             style: TextStyle(color: Colors.black45),
                           );
+                        }
                         return SelectableText(
                           leaving,
                           style: const TextStyle(
@@ -151,11 +152,12 @@ class LeaveApplicationsScreen extends StatelessWidget {
                       }
 
                       Widget returningWidget() {
-                        if (returning.isEmpty)
+                        if (returning.isEmpty) {
                           return const Text(
                             '\u2014',
                             style: TextStyle(color: Colors.black45),
                           );
+                        }
                         return Text(
                           returning,
                           style: const TextStyle(

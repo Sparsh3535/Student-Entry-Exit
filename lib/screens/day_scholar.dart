@@ -1,5 +1,6 @@
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'dart:math' as math;
 
 class DayScholarScreen extends StatelessWidget {
   final ValueListenable<List<Map<String, dynamic>>> applicationsListenable;
@@ -34,163 +35,193 @@ class DayScholarScreen extends StatelessWidget {
                 }
                 return SingleChildScrollView(
                   scrollDirection: Axis.horizontal,
-                  child: ConstrainedBox(
-                    constraints: const BoxConstraints(minWidth: 900),
-                    child: SingleChildScrollView(
-                      child: DataTable(
-                        columnSpacing: 20,
-                        headingRowHeight: 56,
-                        dataRowHeight: 56,
-                        columns: const [
-                          DataColumn(
-                            label: Text(
-                              'Name',
-                              style: TextStyle(fontWeight: FontWeight.bold),
-                            ),
-                          ),
-                          DataColumn(
-                            label: Text(
-                              'Id',
-                              style: TextStyle(fontWeight: FontWeight.bold),
-                            ),
-                          ),
-                          DataColumn(
-                            label: Text(
-                              'Phone',
-                              style: TextStyle(fontWeight: FontWeight.bold),
-                            ),
-                          ),
-                          DataColumn(
-                            label: Text(
-                              'Location',
-                              style: TextStyle(fontWeight: FontWeight.bold),
-                            ),
-                          ),
-                          DataColumn(
-                            label: Text(
-                              'In Time',
-                              style: TextStyle(fontWeight: FontWeight.bold),
-                            ),
-                          ),
-                          DataColumn(
-                            label: Text(
-                              'Out Time',
-                              style: TextStyle(fontWeight: FontWeight.bold),
-                            ),
-                          ),
-                          DataColumn(
-                            label: Text(
-                              'Security',
-                              style: TextStyle(fontWeight: FontWeight.bold),
-                            ),
-                          ),
-                        ],
-                        rows: rows.map((r) {
-                          final name = _cell(r, [
-                            'name',
-                            'Name',
-                            'fullName',
-                            'fullname',
-                          ]);
-                          final id = _cell(r, [
-                            'id',
-                            'Id',
-                            'roll',
-                            'roll_no',
-                            'rollno',
-                            'Roll Number',
-                          ]);
-                          final phone = _cell(r, [
-                            'phone',
-                            'Phone',
-                            'mobile',
-                            'Phone Number',
-                          ]);
-                          final location = _cell(r, [
-                            'location',
-                            'Location',
-                            'address',
-                          ]);
-                          final intime = _cell(r, [
-                            'intime',
-                            'in_time',
-                            'inTime',
-                          ]);
-                          final outtime = _cell(r, [
-                            'outtime',
-                            'out_time',
-                            'outTime',
-                          ]);
-                          final security = _cell(r, ['security', 'Security']);
-                          String _chipLabel() {
-                            // Only show explicit security status when provided.
-                            return security.isNotEmpty ? security : '';
-                          }
-
-                          Color _chipColor() {
-                            final s = security.toLowerCase();
-                            if (s.contains('checked'))
-                              return Colors.green.shade600;
-                            if (s.contains('late'))
-                              return Colors.amber.shade700;
-                            if (s.contains('unverified') || s.contains('un'))
-                              return Colors.red.shade400;
-                            return Colors.grey.shade400;
-                          }
-
-                          Widget intimeWidget() {
-                            if (intime.isEmpty) return const SelectableText('');
-                            return SelectableText(
-                              intime,
-                              style: const TextStyle(
-                                color: Color(0xFF2E7D32),
-                                fontWeight: FontWeight.w600,
+                  child: Builder(
+                    builder: (ctx) {
+                      final screenWidth = MediaQuery.of(ctx).size.width - 48;
+                      final minW = screenWidth > 900.0 ? screenWidth : 900.0;
+                      final colCount = 7; // fixed columns in this table
+                      final columnSpacing =
+                          (minW / math.max(1, colCount).toDouble()) * 0.9;
+                      return ConstrainedBox(
+                        constraints: BoxConstraints(minWidth: minW),
+                        child: SingleChildScrollView(
+                          child: DataTable(
+                            columnSpacing: columnSpacing,
+                            headingRowHeight: 64,
+                            dataRowHeight: 64,
+                            columns: const [
+                              DataColumn(
+                                label: Text(
+                                  'Name',
+                                  style: TextStyle(fontWeight: FontWeight.bold),
+                                ),
                               ),
-                            );
-                          }
-
-                          Widget outtimeWidget() {
-                            if (outtime.isEmpty)
-                              return const Text(
-                                '\u2014',
-                                style: TextStyle(color: Colors.black45),
-                              );
-                            return Text(
-                              outtime,
-                              style: const TextStyle(
-                                color: Color(0xFFD32F2F),
-                                fontWeight: FontWeight.w600,
+                              DataColumn(
+                                label: Text(
+                                  'Id',
+                                  style: TextStyle(fontWeight: FontWeight.bold),
+                                ),
                               ),
-                            );
-                          }
-
-                          final chipLabel = _chipLabel();
-                          return DataRow(
-                            cells: [
-                              DataCell(SelectableText(name)),
-                              DataCell(SelectableText(id)),
-                              DataCell(SelectableText(phone)),
-                              DataCell(SelectableText(location)),
-                              DataCell(intimeWidget()),
-                              DataCell(outtimeWidget()),
-                              DataCell(
-                                chipLabel.isEmpty
-                                    ? const SizedBox.shrink()
-                                    : Chip(
-                                        label: Text(
-                                          chipLabel,
-                                          style: const TextStyle(
-                                            color: Colors.white,
-                                          ),
-                                        ),
-                                        backgroundColor: _chipColor(),
-                                      ),
+                              DataColumn(
+                                label: Text(
+                                  'Phone',
+                                  style: TextStyle(fontWeight: FontWeight.bold),
+                                ),
+                              ),
+                              DataColumn(
+                                label: Text(
+                                  'Location',
+                                  style: TextStyle(fontWeight: FontWeight.bold),
+                                ),
+                              ),
+                              DataColumn(
+                                label: Text(
+                                  'In Time',
+                                  style: TextStyle(fontWeight: FontWeight.bold),
+                                ),
+                              ),
+                              DataColumn(
+                                label: Text(
+                                  'Out Time',
+                                  style: TextStyle(fontWeight: FontWeight.bold),
+                                ),
+                              ),
+                              DataColumn(
+                                label: Text(
+                                  'Security',
+                                  style: TextStyle(fontWeight: FontWeight.bold),
+                                ),
                               ),
                             ],
-                          );
-                        }).toList(),
-                      ),
-                    ),
+                            rows: rows.map((r) {
+                              final name = _cell(r, [
+                                'name',
+                                'Name',
+                                'fullName',
+                                'fullname',
+                              ]);
+                              final id = _cell(r, [
+                                'id',
+                                'Id',
+                                'roll',
+                                'roll_no',
+                                'rollno',
+                                'Roll Number',
+                              ]);
+                              final phone = _cell(r, [
+                                'phone',
+                                'Phone',
+                                'mobile',
+                                'Phone Number',
+                              ]);
+                              final location = _cell(r, [
+                                'location',
+                                'Location',
+                                'address',
+                              ]);
+                              final intime = _cell(r, [
+                                'intime',
+                                'in_time',
+                                'inTime',
+                              ]);
+                              final outtime = _cell(r, [
+                                'outtime',
+                                'out_time',
+                                'outTime',
+                              ]);
+                              final security = _cell(r, [
+                                'security',
+                                'Security',
+                              ]);
+                              String chipLabel0() {
+                                // Only show explicit security status when provided.
+                                return security.isNotEmpty ? security : '';
+                              }
+
+                              Color chipColor() {
+                                final s = security.toLowerCase();
+                                if (s.contains('checked')) {
+                                  return Colors.green.shade600;
+                                }
+                                if (s.contains('late')) {
+                                  return Colors.amber.shade700;
+                                }
+                                if (s.contains('unverified') ||
+                                    s.contains('un')) {
+                                  return Colors.red.shade400;
+                                }
+                                return Colors.grey.shade400;
+                              }
+
+                              Widget intimeWidget() {
+                                if (intime.isEmpty)
+                                  return const SelectableText('');
+                                return SelectableText(
+                                  intime,
+                                  style: const TextStyle(
+                                    color: Color(0xFF2E7D32),
+                                    fontWeight: FontWeight.w600,
+                                    fontSize: 14,
+                                  ),
+                                );
+                              }
+
+                              Widget outtimeWidget() {
+                                if (outtime.isEmpty) {
+                                  return const Text(
+                                    '\u2014',
+                                    style: TextStyle(color: Colors.black45),
+                                  );
+                                }
+                                return Text(
+                                  outtime,
+                                  style: const TextStyle(
+                                    color: Color(0xFFD32F2F),
+                                    fontWeight: FontWeight.w600,
+                                    fontSize: 14,
+                                  ),
+                                );
+                              }
+
+                              final chipLabel = chipLabel0();
+                              const cellStyle = TextStyle(fontSize: 14);
+                              return DataRow(
+                                cells: [
+                                  DataCell(
+                                    SelectableText(name, style: cellStyle),
+                                  ),
+                                  DataCell(
+                                    SelectableText(id, style: cellStyle),
+                                  ),
+                                  DataCell(
+                                    SelectableText(phone, style: cellStyle),
+                                  ),
+                                  DataCell(
+                                    SelectableText(location, style: cellStyle),
+                                  ),
+                                  DataCell(intimeWidget()),
+                                  DataCell(outtimeWidget()),
+                                  DataCell(
+                                    chipLabel.isEmpty
+                                        ? const SizedBox.shrink()
+                                        : Chip(
+                                            label: Text(
+                                              chipLabel,
+                                              style: const TextStyle(
+                                                color: Colors.white,
+                                                fontSize: 13,
+                                              ),
+                                            ),
+                                            backgroundColor: chipColor(),
+                                          ),
+                                  ),
+                                ],
+                              );
+                            }).toList(),
+                          ),
+                        ),
+                      );
+                    },
                   ),
                 );
               },

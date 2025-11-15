@@ -1311,14 +1311,41 @@ class _HomeScreenState extends State<HomeScreen> {
           r['name'] != null &&
           r['name'].toString() == name;
       if (sameById || sameByPhone || sameByName) {
+        // Hostel in/out logic: FIRST scan should fill OUT time, SECOND scan should fill IN time.
+        // If both are already present, start a new session (again OUT first).
         final prevIn = r['intime'] as String?;
-        if (prevIn == null || prevIn.toString().trim().isEmpty) {
-          final now = _shortDateTime(DateTime.now());
+        final prevOut = r['outtime'] as String?;
+        final now = _shortDateTime(DateTime.now());
+
+        if (prevOut == null || prevOut.toString().trim().isEmpty) {
+          // first relevant scan -> set outtime
+          setState(() {
+            r['outtime'] = now;
+            target[i] = Map<String, dynamic>.from(r);
+            _log('Hostel: set outtime to $now for id=${id ?? phone ?? name}');
+          });
+        } else if (prevIn == null || prevIn.toString().trim().isEmpty) {
+          // outtime exists but intime empty -> set intime (return/enter)
           setState(() {
             r['intime'] = now;
             target[i] = Map<String, dynamic>.from(r);
+            _log('Hostel: set intime to $now for id=${id ?? phone ?? name}');
+          });
+        } else {
+          // both intime + outtime present -> start a new session with OUT filled first
+          final newRow = <String, dynamic>{
+            'name': r['name'],
+            'id': r['id'],
+            'phone': r['phone'],
+            'location': r['location'],
+            'intime': null,
+            'outtime': now,
+            'security': null,
+          };
+          setState(() {
+            target.add(newRow);
             _log(
-              'Updated existing row intime to $now for id=${id ?? phone ?? name}',
+              'Hostel: started new session (outtime=$now) for id=${id ?? phone ?? name}',
             );
           });
         }

@@ -1,7 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:qr_scanner_desktop/screens/home_screen.dart';
+import 'package:qr_scanner_desktop/server_service.dart';
 
 void main() {
+  WidgetsFlutterBinding.ensureInitialized();
+  ServerService().startServer();
   runApp(const MyApp());
 }
 

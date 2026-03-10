@@ -2,23 +2,41 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'dart:math' as math;
 
+import '../server_service.dart';
 import '../utils.dart';
 
-class DayScholarScreen extends StatelessWidget {
-  final ValueListenable<List<Map<String, dynamic>>> applicationsListenable;
-  const DayScholarScreen({super.key, required this.applicationsListenable});
+class DayScholarScreen extends StatefulWidget {
+  const DayScholarScreen({super.key});
+
+  @override
+  State<DayScholarScreen> createState() => _DayScholarScreenState();
+}
+
+class _DayScholarScreenState extends State<DayScholarScreen> {
+  final ServerService _serverService = ServerService();
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('Day scholar')),
+      appBar: AppBar(
+        title: const Text('Day Scholar'),
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.clear_all),
+            tooltip: 'Clear Table',
+            onPressed: () {
+              _serverService.clearDayScholarRows();
+            },
+          ),
+        ],
+      ),
       body: Padding(
         padding: const EdgeInsets.all(16.0),
         child: Card(
           child: Padding(
             padding: const EdgeInsets.all(8.0),
             child: ValueListenableBuilder<List<Map<String, dynamic>>>(
-              valueListenable: applicationsListenable,
+              valueListenable: _serverService.dayRowsNotifier,
               builder: (context, rows, _) {
                 if (rows.isEmpty) {
                   return const Center(
@@ -30,9 +48,6 @@ class DayScholarScreen extends StatelessWidget {
                   child: Builder(
                     builder: (ctx) {
                       final screenWidth = MediaQuery.of(ctx).size.width - 48;
-                      // Keep table width within the available viewport so the
-                      // right-most (Security) column is visible without
-                      // unnecessary horizontal scrolling on normal screens.
                       final minW = screenWidth;
                       final colCount = 7; // fixed columns in this table
                       final columnSpacing = math.max(
@@ -230,4 +245,3 @@ class DayScholarScreen extends StatelessWidget {
     );
   }
 }
-

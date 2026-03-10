@@ -1,27 +1,19 @@
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
+import '../server_service.dart';
 import '../utils.dart';
 
-class LeaveApplicationsScreen extends StatelessWidget {
-  // Changed from List to ValueListenable
-  final ValueListenable<List<Map<String, dynamic>>> applicationsListenable;
-  const LeaveApplicationsScreen({
-    super.key,
-    required this.applicationsListenable,
-  });
+class LeaveApplicationsScreen extends StatefulWidget {
+  const LeaveApplicationsScreen({super.key});
 
-  bool _isLeave(Map<String, dynamic> a) {
-    final type = firstNonEmptyString(a, ['type', 'Type']).toLowerCase();
-    if (type.contains('leave')) return true;
-    final hasLeaving = a.keys.any(
-      (k) => k.toString().toLowerCase().contains('leaving'),
-    );
-    final hasReturning = a.keys.any(
-      (k) => k.toString().toLowerCase().contains('returning'),
-    );
-    return hasLeaving || hasReturning;
-  }
+  @override
+  State<LeaveApplicationsScreen> createState() =>
+      _LeaveApplicationsScreenState();
+}
+
+class _LeaveApplicationsScreenState extends State<LeaveApplicationsScreen> {
+  final ServerService _serverService = ServerService();
 
   String _formatDateTime(String? s) {
     if (s == null) return '';
@@ -52,15 +44,23 @@ class LeaveApplicationsScreen extends StatelessWidget {
     ];
 
     return Scaffold(
-      appBar: AppBar(title: const Text('Leave Applications')),
+      appBar: AppBar(
+        title: const Text('Leave Applications'),
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.clear_all),
+            tooltip: 'Clear Table',
+            onPressed: () {
+              _serverService.clearLeaveApplications();
+            },
+          ),
+        ],
+      ),
       body: Padding(
         padding: const EdgeInsets.all(12.0),
-        // Added ValueListenableBuilder here
         child: ValueListenableBuilder<List<Map<String, dynamic>>>(
-          valueListenable: applicationsListenable,
-          builder: (context, allApplications, _) {
-            final leaves = allApplications.where((a) => _isLeave(a)).toList();
-
+          valueListenable: _serverService.leaveAppsNotifier,
+          builder: (context, leaves, _) {
             if (leaves.isEmpty) {
               return const Center(
                 child: Text('No leave applications received yet.'),
@@ -161,9 +161,8 @@ class LeaveApplicationsScreen extends StatelessWidget {
                         );
                       }
 
-                      final statusLabel = duration.isNotEmpty
-                          ? 'Duration: $duration'
-                          : '';
+                      final statusLabel =
+                          duration.isNotEmpty ? 'Duration: $duration' : '';
 
                       return DataRow(
                         cells: [
@@ -206,4 +205,3 @@ class LeaveApplicationsScreen extends StatelessWidget {
     );
   }
 }
-

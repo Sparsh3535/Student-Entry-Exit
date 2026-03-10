@@ -1,6 +1,8 @@
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
+import '../utils.dart';
+
 class LeaveApplicationsScreen extends StatelessWidget {
   // Changed from List to ValueListenable
   final ValueListenable<List<Map<String, dynamic>>> applicationsListenable;
@@ -9,18 +11,8 @@ class LeaveApplicationsScreen extends StatelessWidget {
     required this.applicationsListenable,
   });
 
-  String _first(Map<String, dynamic> a, List<String> keys) {
-    for (final k in keys) {
-      if (a.containsKey(k) && a[k] != null) {
-        final s = a[k].toString().trim();
-        if (s.isNotEmpty) return s;
-      }
-    }
-    return '';
-  }
-
   bool _isLeave(Map<String, dynamic> a) {
-    final type = _first(a, ['type', 'Type']).toLowerCase();
+    final type = firstNonEmptyString(a, ['type', 'Type']).toLowerCase();
     if (type.contains('leave')) return true;
     final hasLeaving = a.keys.any(
       (k) => k.toString().toLowerCase().contains('leaving'),
@@ -97,39 +89,41 @@ class LeaveApplicationsScreen extends StatelessWidget {
                         )
                         .toList(),
                     rows: leaves.map((a) {
-                      final name = _first(a, [
+                      final name = firstNonEmptyString(a, [
                         'name',
                         'Name',
                         'full name',
                         'fullname',
                       ]);
-                      final roll = _first(a, [
+                      final roll = firstNonEmptyString(a, [
                         'roll number',
                         'Roll Number',
                         'roll',
                         'id',
                         'Id',
                       ]);
-                      final phone = _first(a, [
+                      final phone = firstNonEmptyString(a, [
                         'phone number',
                         'Phone Number',
                         'phone',
                         'mobile',
                       ]);
                       final leaving = _formatDateTime(
-                        _first(a, ['leaving', 'Leaving', 'from']),
+                        firstNonEmptyString(a, ['leaving', 'Leaving', 'from']),
                       );
                       final returning = _formatDateTime(
-                        _first(a, ['returning', 'Returning', 'to']),
+                        firstNonEmptyString(
+                            a, ['returning', 'Returning', 'to']),
                       );
-                      final duration = _first(a, ['duration', 'Duration']);
-                      final address = _first(a, [
+                      final duration =
+                          firstNonEmptyString(a, ['duration', 'Duration']);
+                      final address = firstNonEmptyString(a, [
                         'address',
                         'Address',
                         'location',
                         'Location',
                       ]);
-                      final received = _first(a, [
+                      final received = firstNonEmptyString(a, [
                         'receivedAt',
                         'received_at',
                         'received',
@@ -212,3 +206,4 @@ class LeaveApplicationsScreen extends StatelessWidget {
     );
   }
 }
+

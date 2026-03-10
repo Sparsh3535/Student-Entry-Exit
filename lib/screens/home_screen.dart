@@ -7,6 +7,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'day_scholar.dart';
 import 'leave_applications.dart';
+import '../utils.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -28,12 +29,6 @@ class _HomeScreenState extends State<HomeScreen> {
   );
   // Optional in-memory override for the current security person's name.
   String? _securityOverride;
-
-  // ADB auto-reverse monitor — tries to run `adb reverse tcp:<port> tcp:<port>`
-  // when an Android device is detected so you don't need to run adb manually.
-  Timer? _adbTimer;
-  bool _adbReverseDone = false;
-  String? _adbPath; // discovered or explicit adb executable path
 
   // Simple adb watcher (wait-for-device -> run adb reverse)
   Process? _adbWatcherProcess;
@@ -77,7 +72,6 @@ class _HomeScreenState extends State<HomeScreen> {
     _stopServer();
     _hScroll.dispose();
     _portController.dispose();
-    _stopAdbMonitor();
     _stopAdbWatcher();
     // dispose notifiers
     try {
@@ -310,7 +304,7 @@ class _HomeScreenState extends State<HomeScreen> {
 
     // Build normalized row preferring parsed kv values then map keys
     final name =
-        _firstString(raw, [
+        firstValueAsString(raw, [
           'name',
           'Name',
           'fullName',
@@ -320,7 +314,7 @@ class _HomeScreenState extends State<HomeScreen> {
         kvFromValue['name'] ??
         '';
     final id =
-        _firstString(raw, [
+        firstValueAsString(raw, [
           'id',
           'Id',
           'roll',
@@ -333,7 +327,7 @@ class _HomeScreenState extends State<HomeScreen> {
         kvFromValue['roll'] ??
         '';
     final phone =
-        _firstString(raw, [
+        firstValueAsString(raw, [
           'phone',
           'Phone',
           'mobile',
@@ -344,7 +338,7 @@ class _HomeScreenState extends State<HomeScreen> {
         kvFromValue['phone'] ??
         '';
     final location =
-        _firstString(raw, ['location', 'Location', 'address']) ??
+        firstValueAsString(raw, ['location', 'Location', 'address']) ??
         kvFromValue['location'] ??
         '';
 
@@ -369,15 +363,7 @@ class _HomeScreenState extends State<HomeScreen> {
         .join(' ');
   }
 
-  String? _firstString(Map<String, dynamic> m, List<String> keys) {
-    for (final k in keys) {
-      if (m.containsKey(k) && m[k] != null) {
-        final v = m[k];
-        return v is String ? v : v.toString();
-      }
-    }
-    return null;
-  }
+
 
   String _shortDateTime(DateTime dt) {
     String two(int n) => n.toString().padLeft(2, '0');
@@ -1072,144 +1058,7 @@ class _HomeScreenState extends State<HomeScreen> {
     return 'Unknown';
   }
 
-  void _startAdbMonitor() {
-    if (_adbReverseDone) return;
-    // try immediately, then periodic attempts
-    Future(() => _tryAdbReverse());
-    _adbTimer ??= Timer.periodic(const Duration(seconds: 4), (_) {
-      if (_adbReverseDone) {
-        _stopAdbMonitor();
-        return;
-      }
-      _tryAdbReverse();
-    });
-  }
 
-  void _stopAdbMonitor() {
-    _adbTimer?.cancel();
-    _adbTimer = null;
-  }
-
-  Future<String?> _findAdbExecutable() async {
-    // if already discovered, reuse
-    if (_adbPath != null) return _adbPath;
-
-    try {
-      // prefer system PATH lookup
-      final whereCmd = Platform.isWindows ? 'where' : 'which';
-      final which = await Process.run(whereCmd, ['adb'], runInShell: true)
-          .timeout(
-            const Duration(seconds: 2),
-            onTimeout: () => ProcessResult(0, 1, '', 'timeout'),
-          );
-      if (which.exitCode == 0) {
-        final out = which.stdout
-            .toString()
-            .trim()
-            .split(RegExp(r'\r?\n'))
-            .first;
-        if (out.isNotEmpty) {
-          _adbPath = out;
-          _log('Found adb at $_adbPath (via $whereCmd)');
-          return _adbPath;
-        }
-      }
-    } catch (_) {}
-
-    // fallback: check common env vars (ANDROID_HOME / ANDROID_SDK_ROOT)
-    final envCandidates = <String?>[
-      Platform.environment['ANDROID_HOME'],
-      Platform.environment['ANDROID_SDK_ROOT'],
-    ];
-    for (final base in envCandidates) {
-      if (base == null || base.isEmpty) continue;
-      final candidate = Platform.isWindows
-          ? '$base\\platform-tools\\adb.exe'
-          : '$base/platform-tools/adb';
-      final f = File(candidate);
-      if (await f.exists()) {
-        _adbPath = candidate;
-        _log('Found adb at $_adbPath (via env SDK path)');
-        return _adbPath;
-      }
-    }
-
-    _log(
-      'adb executable not found (ensure platform-tools in PATH or set ANDROID_SDK_ROOT/ANDROID_HOME)',
-    );
-    return null;
-  }
-
-  Future<void> _tryAdbReverse() async {
-    // don't run concurrently
-    if (_adbReverseDone) return;
-    _log('ADB monitor: looking for adb...');
-
-    final adb = await _findAdbExecutable();
-    if (adb == null) return;
-
-    try {
-      // start adb server
-      final start = await Process.run(adb, ['start-server'], runInShell: true)
-          .timeout(
-            const Duration(seconds: 3),
-            onTimeout: () => ProcessResult(0, 1, '', 'timeout'),
-          );
-      _log('adb start-server exit=${start.exitCode}');
-
-      // list devices with details
-      final devRes = await Process.run(adb, ['devices', '-l'], runInShell: true)
-          .timeout(
-            const Duration(seconds: 3),
-            onTimeout: () => ProcessResult(0, 1, '', 'timeout'),
-          );
-      final devOut = devRes.stdout.toString();
-      _log('adb devices output: ${devOut.replaceAll(RegExp(r'\r?\n'), ' | ')}');
-
-      // find lines that contain a connected "device"
-      final lines = devOut
-          .split(RegExp(r'\r?\n'))
-          .map((l) => l.trim())
-          .where((l) => l.isNotEmpty)
-          .toList();
-      final deviceLines = lines
-          .where(
-            (l) => l.contains('\tdevice') || RegExp(r'\sdevice\s').hasMatch(l),
-          )
-          .toList();
-      if (deviceLines.isEmpty) {
-        _log('ADB: no authorized device found');
-        return;
-      }
-
-      // attempt reverse per-device (use -s serial if available)
-      for (final line in deviceLines) {
-        final serialMatch = RegExp(r'^([^\s]+)').firstMatch(line);
-        final serial = serialMatch?.group(1);
-        final args = serial != null
-            ? ['-s', serial, 'reverse', 'tcp:$_port', 'tcp:$_port']
-            : ['reverse', 'tcp:$_port', 'tcp:$_port'];
-        _log('Running: $adb ${args.join(' ')}');
-        final rev = await Process.run(adb, args, runInShell: true).timeout(
-          const Duration(seconds: 4),
-          onTimeout: () => ProcessResult(0, 1, '', 'timeout'),
-        );
-        _log(
-          'adb reverse exit=${rev.exitCode} stdout=${rev.stdout} stderr=${rev.stderr}',
-        );
-        if (rev.exitCode == 0) {
-          _adbReverseDone = true;
-          _log('ADB reverse succeeded for port $_port');
-          _stopAdbMonitor();
-          return;
-        }
-      }
-
-      _log('ADB reverse attempts failed; will retry');
-    } catch (e) {
-      _log('ADB check failed: $e');
-    }
-  }
 
   // Simple watcher that uses `adb wait-for-device` and runs `adb reverse` when a device appears.
   // This is lightweight and runs in the background while the app is open.
@@ -1296,7 +1145,7 @@ class _HomeScreenState extends State<HomeScreen> {
   // Returns true if routed (so caller doesn't add a generic row).
   bool _routeByType(Map<String, dynamic> raw) {
     // try direct keys first
-    String? type = _firstString(raw, ['type', 'Type']);
+    String? type = firstValueAsString(raw, ['type', 'Type']);
     final kv = _parseKeyValueBlock(raw);
     type ??= kv['type'];
     if (type == null) return false;
@@ -1307,8 +1156,7 @@ class _HomeScreenState extends State<HomeScreen> {
 
     // Leave
     if (t.contains('leave')) {
-      final pl =
-          _tryParseLeaveApplication(raw) ??
+      final pl = _tryParseLeaveApplication(raw) ??
           _tryParseLeaveApplication(possibleValue);
       if (pl != null) {
         setState(() {
@@ -1321,50 +1169,39 @@ class _HomeScreenState extends State<HomeScreen> {
       return false;
     }
 
-    // Hostel
-    if (t.contains('hostel') || t.contains('hosteller')) {
-      final name = _firstString(raw, ['name', 'Name']) ?? kv['name'];
-      final id =
-          _firstString(raw, ['id', 'Id', 'roll', 'roll_no', 'rollno']) ??
+    Map<String, dynamic> extractStudentInfo() {
+      final name =
+          firstValueAsString(raw, ['name', 'Name', 'fullName', 'fullname']) ??
+              kv['name'];
+      final id = firstValueAsString(
+              raw, ['id', 'Id', 'roll', 'roll_no', 'rollno', 'Roll Number']) ??
           kv['roll number'] ??
           kv['roll'];
       final phone =
-          _firstString(raw, ['phone', 'Phone', 'mobile']) ??
-          kv['phone number'] ??
-          kv['phone'];
+          firstValueAsString(raw, ['phone', 'Phone', 'mobile', 'Phone Number']) ??
+              kv['phone number'] ??
+              kv['phone'];
       final location =
-          _firstString(raw, ['location', 'Location', 'address']) ??
-          kv['location'];
-      final minimal = <String, dynamic>{
+          firstValueAsString(raw, ['location', 'Location', 'address']) ??
+              kv['location'];
+      return {
         'name': name,
         'id': id,
         'phone': phone,
-        'location': location,
+        'location': location
       };
+    }
+
+    // Hostel
+    if (t.contains('hostel') || t.contains('hosteller')) {
+      final minimal = extractStudentInfo();
       _insertOrUpdateRow(_rows, minimal);
       return true;
     }
 
     // Day scholar
     if (t.contains('day') || t.contains('scholar')) {
-      final name = _firstString(raw, ['name', 'Name']) ?? kv['name'];
-      final id =
-          _firstString(raw, ['id', 'Id', 'roll', 'roll_no', 'rollno']) ??
-          kv['roll number'] ??
-          kv['roll'];
-      final phone =
-          _firstString(raw, ['phone', 'Phone', 'mobile']) ??
-          kv['phone number'] ??
-          kv['phone'];
-      final location =
-          _firstString(raw, ['location', 'Location', 'address']) ??
-          kv['location'];
-      final minimal = <String, dynamic>{
-        'name': name,
-        'id': id,
-        'phone': phone,
-        'location': location,
-      };
+      final minimal = extractStudentInfo();
       _insertOrUpdateDayRow(_dayRows, minimal);
       return true;
     }
@@ -1396,70 +1233,57 @@ class _HomeScreenState extends State<HomeScreen> {
     final String? id = fields['id'] as String?;
     final String? phone = fields['phone'] as String?;
 
-    for (var i = target.length - 1; i >= 0; i--) {
-      final r = target[i];
-      final sameById =
-          id != null && r['id'] != null && r['id'].toString() == id;
-      final sameByPhone =
-          (id == null || !sameById) &&
-          phone != null &&
-          r['phone'] != null &&
-          r['phone'].toString() == phone;
-      final sameByName =
-          (id == null && phone == null) &&
-          name != null &&
-          r['name'] != null &&
-          r['name'].toString() == name;
+    final index = _findRowIndex(target, fields);
 
-      if (sameById || sameByPhone || sameByName) {
-        final prevIn = (r['intime'] as String?) ?? '';
-        final prevOut = (r['outtime'] as String?) ?? '';
-        final now = _shortDateTime(DateTime.now());
+    if (index != -1) {
+      final r = target[index];
+      final prevIn = (r['intime'] as String?) ?? '';
+      final prevOut = (r['outtime'] as String?) ?? '';
+      final now = _shortDateTime(DateTime.now());
 
-        if (prevIn.trim().isEmpty) {
-          // first event -> set intime
-          setState(() {
-            r['intime'] = now;
-            target[i] = Map<String, dynamic>.from(r);
-            _log(
-              'DayScholar: set intime to $now for id=${id ?? phone ?? name}',
-            );
-          });
-          // notify listeners so DayScholar screen updates immediately
-          _dayRowsNotifier.value = List<Map<String, dynamic>>.from(_dayRows);
-        } else if (prevOut.trim().isEmpty) {
-          // intime exists and outtime empty -> set outtime
-          setState(() {
-            r['outtime'] = now;
-            target[i] = Map<String, dynamic>.from(r);
-            _log(
-              'DayScholar: set outtime to $now for id=${id ?? phone ?? name}',
-            );
-          });
-          // notify listeners so DayScholar screen updates immediately
-          _dayRowsNotifier.value = List<Map<String, dynamic>>.from(_dayRows);
-        } else {
-          // both intime+outtime present -> start a new session with new intime
-          final newRow = <String, dynamic>{
-            'name': r['name'],
-            'id': r['id'],
-            'phone': r['phone'],
-            'location': r['location'],
-            'intime': now,
-            'outtime': null,
-            'security': null,
-          };
-          setState(() {
-            target.add(newRow);
-            _log(
-              'DayScholar: started new session (intime=$now) for id=${id ?? phone ?? name}',
-            );
-          });
-          // notify listeners so DayScholar screen updates immediately
-          _dayRowsNotifier.value = List<Map<String, dynamic>>.from(_dayRows);
-        }
-        return;
+      if (prevIn.trim().isEmpty) {
+        // first event -> set intime
+        setState(() {
+          r['intime'] = now;
+          target[index] = Map<String, dynamic>.from(r);
+          _log(
+            'DayScholar: set intime to $now for id=${id ?? phone ?? name}',
+          );
+        });
+        // notify listeners so DayScholar screen updates immediately
+        _dayRowsNotifier.value = List<Map<String, dynamic>>.from(_dayRows);
+      } else if (prevOut.trim().isEmpty) {
+        // intime exists and outtime empty -> set outtime
+        setState(() {
+          r['outtime'] = now;
+          target[index] = Map<String, dynamic>.from(r);
+          _log(
+            'DayScholar: set outtime to $now for id=${id ?? phone ?? name}',
+          );
+        });
+        // notify listeners so DayScholar screen updates immediately
+        _dayRowsNotifier.value = List<Map<String, dynamic>>.from(_dayRows);
+      } else {
+        // both intime+outtime present -> start a new session with new intime
+        final newRow = <String, dynamic>{
+          'name': r['name'],
+          'id': r['id'],
+          'phone': r['phone'],
+          'location': r['location'],
+          'intime': now,
+          'outtime': null,
+          'security': null,
+        };
+        setState(() {
+          target.add(newRow);
+          _log(
+            'DayScholar: started new session (intime=$now) for id=${id ?? phone ?? name}',
+          );
+        });
+        // notify listeners so DayScholar screen updates immediately
+        _dayRowsNotifier.value = List<Map<String, dynamic>>.from(_dayRows);
       }
+      return;
     }
 
     // not found -> add with intime set
@@ -1478,6 +1302,40 @@ class _HomeScreenState extends State<HomeScreen> {
     });
     // notify listeners with a defensive copy
     _dayRowsNotifier.value = List<Map<String, dynamic>>.from(_dayRows);
+  }
+
+  // Find a row by id, then phone, then name. Returns -1 if not found.
+  int _findRowIndex(
+    List<Map<String, dynamic>> target,
+    Map<String, dynamic> fields,
+  ) {
+    final String? name = fields['name'] as String?;
+    final String? id = fields['id'] as String?;
+    final String? phone = fields['phone'] as String?;
+
+    for (var i = target.length - 1; i >= 0; i--) {
+      final r = target[i];
+      final sameById = id != null &&
+          id.isNotEmpty &&
+          r['id'] != null &&
+          r['id'].toString() == id;
+      final sameByPhone = (id == null || id.isEmpty || !sameById) &&
+          phone != null &&
+          phone.isNotEmpty &&
+          r['phone'] != null &&
+          r['phone'].toString() == phone;
+      final sameByName = (id == null || id.isEmpty) &&
+          (phone == null || phone.isEmpty) &&
+          name != null &&
+          name.isNotEmpty &&
+          r['name'] != null &&
+          r['name'].toString() == name;
+
+      if (sameById || sameByPhone || sameByName) {
+        return i;
+      }
+    }
+    return -1;
   }
 
   // Try to parse leave application from String or Map. Returns normalized map or null.
@@ -1549,69 +1407,57 @@ class _HomeScreenState extends State<HomeScreen> {
     final id = fields['id'] as String?;
     final phone = fields['phone'] as String?;
 
-    for (var i = target.length - 1; i >= 0; i--) {
-      final r = target[i];
-      final sameById =
-          id != null && r['id'] != null && r['id'].toString() == id;
-      final sameByPhone =
-          (id == null || !sameById) &&
-          phone != null &&
-          r['phone'] != null &&
-          r['phone'].toString() == phone;
-      final sameByName =
-          (id == null && phone == null) &&
-          name != null &&
-          r['name'] != null &&
-          r['name'].toString() == name;
-      if (sameById || sameByPhone || sameByName) {
-        // Hostel in/out logic: FIRST scan should fill OUT time, SECOND scan should fill IN time.
-        // If both are already present, start a new session (again OUT first).
-        final prevIn = r['intime'] as String?;
-        final prevOut = r['outtime'] as String?;
-        final now = _shortDateTime(DateTime.now());
+    final index = _findRowIndex(target, fields);
 
-        if (prevOut == null || prevOut.toString().trim().isEmpty) {
-          // first relevant scan -> set outtime; update location if provided
-          setState(() {
-            r['outtime'] = now;
-            final loc = fields['location'];
-            if (loc != null && loc.toString().trim().isNotEmpty) {
-              r['location'] = loc;
-            }
-            target[i] = Map<String, dynamic>.from(r);
-            _log('Hostel: set outtime to $now for id=${id ?? phone ?? name}');
-          });
-        } else if (prevIn == null || prevIn.toString().trim().isEmpty) {
-          // outtime exists but intime empty -> set intime (return/enter); update location
-          setState(() {
-            r['intime'] = now;
-            final loc = fields['location'];
-            if (loc != null && loc.toString().trim().isNotEmpty) {
-              r['location'] = loc;
-            }
-            target[i] = Map<String, dynamic>.from(r);
-            _log('Hostel: set intime to $now for id=${id ?? phone ?? name}');
-          });
-        } else {
-          // both intime + outtime present -> start a new session with OUT filled first, prefer incoming location
-          final newRow = <String, dynamic>{
-            'name': r['name'],
-            'id': r['id'],
-            'phone': r['phone'],
-            'location': fields['location'] ?? r['location'],
-            'intime': null,
-            'outtime': now,
-            'security': null,
-          };
-          setState(() {
-            target.add(newRow);
-            _log(
-              'Hostel: started new session (outtime=$now) for id=${id ?? phone ?? name}',
-            );
-          });
-        }
-        return;
+    if (index != -1) {
+      final r = target[index];
+      // Hostel in/out logic: FIRST scan should fill OUT time, SECOND scan should fill IN time.
+      // If both are already present, start a new session (again OUT first).
+      final prevIn = r['intime'] as String?;
+      final prevOut = r['outtime'] as String?;
+      final now = _shortDateTime(DateTime.now());
+
+      if (prevOut == null || prevOut.toString().trim().isEmpty) {
+        // first relevant scan -> set outtime; update location if provided
+        setState(() {
+          r['outtime'] = now;
+          final loc = fields['location'];
+          if (loc != null && loc.toString().trim().isNotEmpty) {
+            r['location'] = loc;
+          }
+          target[index] = Map<String, dynamic>.from(r);
+          _log('Hostel: set outtime to $now for id=${id ?? phone ?? name}');
+        });
+      } else if (prevIn == null || prevIn.toString().trim().isEmpty) {
+        // outtime exists but intime empty -> set intime (return/enter); update location
+        setState(() {
+          r['intime'] = now;
+          final loc = fields['location'];
+          if (loc != null && loc.toString().trim().isNotEmpty) {
+            r['location'] = loc;
+          }
+          target[index] = Map<String, dynamic>.from(r);
+          _log('Hostel: set intime to $now for id=${id ?? phone ?? name}');
+        });
+      } else {
+        // both intime + outtime present -> start a new session with OUT filled first, prefer incoming location
+        final newRow = <String, dynamic>{
+          'name': r['name'],
+          'id': r['id'],
+          'phone': r['phone'],
+          'location': fields['location'] ?? r['location'],
+          'intime': null,
+          'outtime': now,
+          'security': null,
+        };
+        setState(() {
+          target.add(newRow);
+          _log(
+            'Hostel: started new session (outtime=$now) for id=${id ?? phone ?? name}',
+          );
+        });
       }
+      return;
     }
 
     final normalized = <String, dynamic>{

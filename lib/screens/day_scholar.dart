@@ -2,19 +2,11 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'dart:math' as math;
 
+import '../utils.dart';
+
 class DayScholarScreen extends StatelessWidget {
   final ValueListenable<List<Map<String, dynamic>>> applicationsListenable;
   const DayScholarScreen({super.key, required this.applicationsListenable});
-
-  String _cell(Map<String, dynamic> row, List<String> keys) {
-    for (final k in keys) {
-      if (row.containsKey(k) && row[k] != null) {
-        final s = row[k].toString().trim();
-        if (s.isNotEmpty) return s;
-      }
-    }
-    return '';
-  }
 
   @override
   Widget build(BuildContext context) {
@@ -99,13 +91,13 @@ class DayScholarScreen extends StatelessWidget {
                               ),
                             ],
                             rows: rows.map((r) {
-                              final name = _cell(r, [
+                              final name = firstNonEmptyString(r, [
                                 'name',
                                 'Name',
                                 'fullName',
                                 'fullname',
                               ]);
-                              final id = _cell(r, [
+                              final id = firstNonEmptyString(r, [
                                 'id',
                                 'Id',
                                 'roll',
@@ -113,28 +105,28 @@ class DayScholarScreen extends StatelessWidget {
                                 'rollno',
                                 'Roll Number',
                               ]);
-                              final phone = _cell(r, [
+                              final phone = firstNonEmptyString(r, [
                                 'phone',
                                 'Phone',
                                 'mobile',
                                 'Phone Number',
                               ]);
-                              final location = _cell(r, [
+                              final location = firstNonEmptyString(r, [
                                 'location',
                                 'Location',
                                 'address',
                               ]);
-                              final intime = _cell(r, [
+                              final intime = firstNonEmptyString(r, [
                                 'intime',
                                 'in_time',
                                 'inTime',
                               ]);
-                              final outtime = _cell(r, [
+                              final outtime = firstNonEmptyString(r, [
                                 'outtime',
                                 'out_time',
                                 'outTime',
                               ]);
-                              final security = _cell(r, [
+                              final security = firstNonEmptyString(r, [
                                 'security',
                                 'Security',
                               ]);
@@ -159,8 +151,9 @@ class DayScholarScreen extends StatelessWidget {
                               }
 
                               Widget intimeWidget() {
-                                if (intime.isEmpty)
+                                if (intime.isEmpty) {
                                   return const SelectableText('');
+                                }
                                 return SelectableText(
                                   intime,
                                   style: const TextStyle(
@@ -237,3 +230,4 @@ class DayScholarScreen extends StatelessWidget {
     );
   }
 }
+

@@ -151,6 +151,12 @@ class LeaveApplicationsManager {
         r['leaving'] = incomingLeaving;
       }
 
+      // Update returnDate from incoming data (planned return date from Firebase form)
+      final incomingReturnDate = fields['returnDate']?.toString() ?? '';
+      if (incomingReturnDate.isNotEmpty) {
+        r['returnDate'] = incomingReturnDate;
+      }
+
       if (prevReturning.trim().isEmpty) {
         // returning empty → fill it
         r['returning'] = now;
@@ -180,9 +186,9 @@ class LeaveApplicationsManager {
       } else {
         // both filled → start new row
         final newRow = Map<String, dynamic>.from(r);
-        newRow['leaving'] = now; // new session starts NOW
+        newRow['leaving'] = now;
         newRow['returning'] = null;
-        newRow['duration'] = ''; // will be calculated when returning is filled
+        newRow['duration'] = '';
         newRow['receivedAt'] = now;
         newRow['address'] = fields['address'] ?? r['address'];
         newRow['security'] = SecurityNameService().name;

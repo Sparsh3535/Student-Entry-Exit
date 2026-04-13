@@ -365,6 +365,10 @@ class FirebaseService {
         ? '$leavingDate $leavingTime'
         : leavingDate;
 
+    // Return date and time
+    final String returnDate = _formatTimestampToDate(data['returnDate']);
+    final String returnTime = data['returnTime']?.toString() ?? '';
+
     return {
       'type': 'leave',
       'name': name,
@@ -382,6 +386,11 @@ class FirebaseService {
       'status': data['status']?.toString() ?? 'pending',
       'location': address,
       'createdAt': data['createdAt'] ?? '',
+      // Raw date/time fields for "Granted Leave" / "Granted Return" display
+      'leavingDate': leavingDate,
+      'leavingTime': leavingTime,
+      'returnDate': returnDate,
+      'returnTime': returnTime,
       'security': null,
     };
   }

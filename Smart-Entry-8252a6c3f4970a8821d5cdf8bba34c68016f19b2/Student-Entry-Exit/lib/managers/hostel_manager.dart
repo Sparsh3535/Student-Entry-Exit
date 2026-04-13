@@ -64,49 +64,72 @@ class HostelManager {
       final prevOut = r['outtime'] as String?;
       final now = shortDateTime(DateTime.now());
 
-      // Update _docId from incoming data (may be missing in cached rows)
-      if (fields['_docId'] != null) {
-        r['_docId'] = fields['_docId'];
-      }
+      // Check if this scan is from a DIFFERENT gate pass (different _docId)
+      final existingDocId = r['_docId']?.toString() ?? '';
+      final incomingDocId = fields['_docId']?.toString() ?? '';
+      final isDifferentGatePass = existingDocId.isNotEmpty &&
+          incomingDocId.isNotEmpty &&
+          existingDocId != incomingDocId;
 
-      if (prevOut == null || prevOut.toString().trim().isEmpty) {
-        // first relevant scan -> set outtime; update location if provided
-        r['outtime'] = now;
-        final loc = fields['location'];
-        if (loc != null && loc.toString().trim().isNotEmpty) {
-          r['location'] = loc;
-        }
-        _hostelRows[existingIndex] = Map<String, dynamic>.from(r);
-        logCallback?.call(
-          'Hostel: set outtime to $now for id=${id ?? phone ?? name}',
-        );
-      } else if (prevIn == null || prevIn.toString().trim().isEmpty) {
-        // outtime exists but intime empty -> set intime (return/enter); update location
-        r['intime'] = now;
-        final loc = fields['location'];
-        if (loc != null && loc.toString().trim().isNotEmpty) {
-          r['location'] = loc;
-        }
-        _hostelRows[existingIndex] = Map<String, dynamic>.from(r);
-        logCallback?.call(
-          'Hostel: set intime to $now for id=${id ?? phone ?? name}',
-        );
-        // Both filled -> trigger Firebase delete
-        final docId = r['_docId']?.toString();
-        if (docId != null && docId.isNotEmpty) {
-          onEntryComplete?.call(docId);
-        }
-      } else {
-        // both intime + outtime present -> start a new session with OUT filled first
-        final newRow = Map<String, dynamic>.from(r);
-        newRow['location'] = fields['location'] ?? r['location'];
-        newRow['intime'] = null;
+      // If different gate pass and old one wasn't completed, create new row
+      final oldIncomplete = (prevIn == null || prevIn.toString().trim().isEmpty) ||
+          (prevOut == null || prevOut.toString().trim().isEmpty);
+
+      if (isDifferentGatePass && oldIncomplete) {
+        _log('[HOSTEL MANAGER] Different docId ($incomingDocId vs $existingDocId) — creating new row');
+        final newRow = Map<String, dynamic>.from(fields);
         newRow['outtime'] = now;
+        newRow['intime'] = null;
         newRow['security'] = SecurityNameService().name;
         _hostelRows.add(newRow);
         logCallback?.call(
-          'Hostel: started new session (outtime=$now) for id=${id ?? phone ?? name}',
+          'Hostel: new gate pass — added new entry for id=${id ?? phone ?? name}',
         );
+      } else {
+        // Same gate pass — normal update flow
+        if (fields['_docId'] != null) {
+          r['_docId'] = fields['_docId'];
+        }
+
+        if (prevOut == null || prevOut.toString().trim().isEmpty) {
+          // first relevant scan -> set outtime
+          r['outtime'] = now;
+          final loc = fields['location'];
+          if (loc != null && loc.toString().trim().isNotEmpty) {
+            r['location'] = loc;
+          }
+          _hostelRows[existingIndex] = Map<String, dynamic>.from(r);
+          logCallback?.call(
+            'Hostel: set outtime to $now for id=${id ?? phone ?? name}',
+          );
+        } else if (prevIn == null || prevIn.toString().trim().isEmpty) {
+          // outtime exists but intime empty -> set intime (return/enter)
+          r['intime'] = now;
+          final loc = fields['location'];
+          if (loc != null && loc.toString().trim().isNotEmpty) {
+            r['location'] = loc;
+          }
+          _hostelRows[existingIndex] = Map<String, dynamic>.from(r);
+          logCallback?.call(
+            'Hostel: set intime to $now for id=${id ?? phone ?? name}',
+          );
+          // Both filled -> trigger Firebase delete
+          final docId = r['_docId']?.toString();
+          if (docId != null && docId.isNotEmpty) {
+            onEntryComplete?.call(docId);
+          }
+        } else {
+          // both intime + outtime present -> start a new session
+          final newRow = Map<String, dynamic>.from(r);
+          newRow['location'] = fields['location'] ?? r['location'];
+          newRow['intime'] = null;
+          newRow['outtime'] = now;
+          newRow['security'] = SecurityNameService().name;
+          _hostelRows.add(newRow);
+          logCallback?.call(
+            'Hostel: started new session (outtime=$now) for id=${id ?? phone ?? name}',
+          );
+        }
       }
       _log('[HOSTEL MANAGER] Updates done, setting notifier...');
       debugPrint(

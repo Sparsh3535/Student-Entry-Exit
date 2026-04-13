@@ -37,8 +37,11 @@ class _HomeScreenState extends State<HomeScreen> {
   final TextEditingController _scannerController = TextEditingController();
   Timer? _scannerFocusTimer; // periodic safety net to keep scanner focused
   Timer? _midnightTimer; // auto-reset at midnight
+  Timer? _connectivityTimer; // periodic internet check
   String _currentDate = ''; // track current date for midnight detection
   bool _csvExportedForCurrentDate = false; // tracks if 11:30 PM CSV export succeeded
+  bool _isOnline = true; // internet connectivity status
+  bool _showOnlineBanner = false; // briefly show green banner when back online
 
   // console logs
   final List<String> _logs = [];
@@ -151,15 +154,56 @@ class _HomeScreenState extends State<HomeScreen> {
 
     // Step 4: Start midnight auto-reset timer
     _startMidnightTimer();
+
+    // Step 5: Start internet connectivity monitoring
+    _startConnectivityCheck();
   }
 
   @override
   void dispose() {
     _scannerFocusTimer?.cancel();
     _midnightTimer?.cancel();
+    _connectivityTimer?.cancel();
     _scannerFocusNode.dispose();
     _scannerController.dispose();
     super.dispose();
+  }
+
+  /// Check internet connectivity by attempting a DNS lookup.
+  /// Runs every 15 seconds. Shows/hides a banner based on status.
+  void _startConnectivityCheck() {
+    // Do an initial check immediately
+    _checkConnectivity();
+
+    _connectivityTimer = Timer.periodic(const Duration(seconds: 15), (_) {
+      _checkConnectivity();
+    });
+  }
+
+  Future<void> _checkConnectivity() async {
+    try {
+      final result = await InternetAddress.lookup('google.com')
+          .timeout(const Duration(seconds: 5));
+      final online = result.isNotEmpty && result[0].rawAddress.isNotEmpty;
+
+      if (mounted) {
+        final wasOffline = !_isOnline;
+        setState(() {
+          _isOnline = online;
+          if (wasOffline && online) {
+            // Just came back online — show green banner briefly
+            _showOnlineBanner = true;
+            Future.delayed(const Duration(seconds: 5), () {
+              if (mounted) setState(() => _showOnlineBanner = false);
+            });
+          }
+        });
+      }
+    } catch (e) {
+      if (mounted) {
+        setState(() => _isOnline = false);
+      }
+    }
   }
 
   /// Start a periodic timer that checks every 30 seconds.
@@ -1129,6 +1173,41 @@ class _HomeScreenState extends State<HomeScreen> {
         padding: const EdgeInsets.all(12),
         child: Column(
           children: [
+            // Internet connectivity banner
+            if (!_isOnline)
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 16),
+                color: Colors.red.shade700,
+                child: Row(
+                  children: [
+                    const Icon(Icons.wifi_off, color: Colors.white, size: 20),
+                    const SizedBox(width: 10),
+                    const Expanded(
+                      child: Text(
+                        '⚠ No Internet Connection — Firebase sync is paused. Scanned entries will not be processed until connection is restored.',
+                        style: TextStyle(color: Colors.white, fontSize: 13, fontWeight: FontWeight.w500),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            if (_showOnlineBanner && _isOnline)
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 16),
+                color: Colors.green.shade600,
+                child: Row(
+                  children: [
+                    const Icon(Icons.wifi, color: Colors.white, size: 20),
+                    const SizedBox(width: 10),
+                    const Text(
+                      '✓ Internet Connection Restored',
+                      style: TextStyle(color: Colors.white, fontSize: 13, fontWeight: FontWeight.w500),
+                    ),
+                  ],
+                ),
+              ),
             // Invisible scanner input — captures QR scanner keyboard input
             SizedBox(
               height: 0,

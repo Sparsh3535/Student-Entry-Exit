@@ -58,49 +58,71 @@ class DayScholarManager {
       final prevOut = (r['outtime'] as String?) ?? '';
       final now = shortDateTime(DateTime.now());
 
-      // Update _docId from incoming data (may be missing in cached rows)
-      if (fields['_docId'] != null) {
-        r['_docId'] = fields['_docId'];
-      }
+      // Check if this scan is from a DIFFERENT gate pass (different _docId)
+      final existingDocId = r['_docId']?.toString() ?? '';
+      final incomingDocId = fields['_docId']?.toString() ?? '';
+      final isDifferentGatePass = existingDocId.isNotEmpty &&
+          incomingDocId.isNotEmpty &&
+          existingDocId != incomingDocId;
 
-      if (prevIn.trim().isEmpty) {
-        // first event -> set intime
-        r['intime'] = now;
-        final loc = fields['location'];
-        if (loc != null && loc.toString().trim().isNotEmpty) {
-          r['location'] = loc;
-        }
-        _dayRows[existingIndex] = Map<String, dynamic>.from(r);
-        logCallback?.call(
-          'DayScholar: set intime to $now for id=${id ?? phone ?? name}',
-        );
-      } else if (prevOut.trim().isEmpty) {
-        // intime exists and outtime empty -> set outtime
-        r['outtime'] = now;
-        final loc = fields['location'];
-        if (loc != null && loc.toString().trim().isNotEmpty) {
-          r['location'] = loc;
-        }
-        _dayRows[existingIndex] = Map<String, dynamic>.from(r);
-        logCallback?.call(
-          'DayScholar: set outtime to $now for id=${id ?? phone ?? name}',
-        );
-        // Both filled -> trigger Firebase delete
-        final docId = r['_docId']?.toString();
-        if (docId != null && docId.isNotEmpty) {
-          onEntryComplete?.call(docId);
-        }
-      } else {
-        // both intime+outtime present -> start a new session with new intime
-        final newRow = Map<String, dynamic>.from(r);
+      if (isDifferentGatePass && prevOut.trim().isEmpty) {
+        // Different gate pass for same student, and old one wasn't completed
+        // → DON'T fill outtime on old row. Create a NEW row for the new gate pass.
+        _log('[DAY SCHOLAR MANAGER] Different docId ($incomingDocId vs $existingDocId) — creating new row');
+        final newRow = Map<String, dynamic>.from(fields);
         newRow['intime'] = now;
         newRow['outtime'] = null;
-        newRow['location'] = fields['location'] ?? r['location'];
         newRow['security'] = SecurityNameService().name;
         _dayRows.add(newRow);
         logCallback?.call(
-          'DayScholar: started new session (intime=$now) for id=${id ?? phone ?? name}',
+          'DayScholar: new gate pass — added new entry for id=${id ?? phone ?? name}',
         );
+      } else {
+        // Same gate pass (same docId or no docId) — normal update flow
+        // Update _docId from incoming data (may be missing in cached rows)
+        if (fields['_docId'] != null) {
+          r['_docId'] = fields['_docId'];
+        }
+
+        if (prevIn.trim().isEmpty) {
+          // first event -> set intime
+          r['intime'] = now;
+          final loc = fields['location'];
+          if (loc != null && loc.toString().trim().isNotEmpty) {
+            r['location'] = loc;
+          }
+          _dayRows[existingIndex] = Map<String, dynamic>.from(r);
+          logCallback?.call(
+            'DayScholar: set intime to $now for id=${id ?? phone ?? name}',
+          );
+        } else if (prevOut.trim().isEmpty) {
+          // intime exists and outtime empty -> set outtime
+          r['outtime'] = now;
+          final loc = fields['location'];
+          if (loc != null && loc.toString().trim().isNotEmpty) {
+            r['location'] = loc;
+          }
+          _dayRows[existingIndex] = Map<String, dynamic>.from(r);
+          logCallback?.call(
+            'DayScholar: set outtime to $now for id=${id ?? phone ?? name}',
+          );
+          // Both filled -> trigger Firebase delete
+          final docId = r['_docId']?.toString();
+          if (docId != null && docId.isNotEmpty) {
+            onEntryComplete?.call(docId);
+          }
+        } else {
+          // both intime+outtime present -> start a new session with new intime
+          final newRow = Map<String, dynamic>.from(r);
+          newRow['intime'] = now;
+          newRow['outtime'] = null;
+          newRow['location'] = fields['location'] ?? r['location'];
+          newRow['security'] = SecurityNameService().name;
+          _dayRows.add(newRow);
+          logCallback?.call(
+            'DayScholar: started new session (intime=$now) for id=${id ?? phone ?? name}',
+          );
+        }
       }
       _log('[DAY SCHOLAR MANAGER] Updates done, setting notifier...');
       notifier.value = List<Map<String, dynamic>>.from(_dayRows);

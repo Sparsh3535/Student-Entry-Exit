@@ -16,6 +16,10 @@ class HostelManager {
   /// with the _docId so Firebase document can be deleted
   Function(String docId)? onEntryComplete;
 
+  /// Cooldown: track last scan time per student to prevent accidental double-scans
+  final Map<String, DateTime> _lastScanTime = {};
+  static const _scanCooldown = Duration(seconds: 10);
+
   List<Map<String, dynamic>> get rows => _hostelRows;
 
   HostelManager() {
@@ -38,6 +42,18 @@ class HostelManager {
 
     _log('[HOSTEL MANAGER] name=$name, id=$id, phone=$phone');
     _log('[HOSTEL MANAGER] Current total rows: ${_hostelRows.length}');
+
+    // Cooldown: ignore duplicate scans within 10 seconds for the same student
+    final scanKey = id ?? phone ?? name ?? '';
+    if (scanKey.isNotEmpty) {
+      final lastScan = _lastScanTime[scanKey];
+      if (lastScan != null && DateTime.now().difference(lastScan) < _scanCooldown) {
+        _log('[HOSTEL MANAGER] ⚠ COOLDOWN: Ignoring duplicate scan for $scanKey (within 10s)');
+        logCallback?.call('Hostel: duplicate scan ignored for $scanKey (10s cooldown)');
+        return;
+      }
+      _lastScanTime[scanKey] = DateTime.now();
+    }
 
     final existingIndex = findExistingRowIndex(_hostelRows, id, phone, name);
     _log('[HOSTEL MANAGER] Found existing row at index: $existingIndex');

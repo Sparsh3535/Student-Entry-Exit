@@ -15,124 +15,132 @@ class FirebaseService {
   }
 
   /// Delete a document by its Firestore document ID from both collections.
+  /// Tries both gate_passes and leave_requests in parallel.
   Future<void> deleteByDocumentId(String docId) async {
+    print('[Firebase Service] Deleting document: $docId');
     try {
-      print('[Firebase Service] Deleting document: $docId');
-      // Try gate_passes
-      final gpDoc = await _firestore.collection('gate_passes').doc(docId).get();
-      if (gpDoc.exists) {
-        await _firestore.collection('gate_passes').doc(docId).delete();
-        print('[Firebase Service] ✓ Deleted from gate_passes: $docId');
-        return;
-      }
-      // Try leave_requests
-      final lrDoc = await _firestore.collection('leave_requests').doc(docId).get();
-      if (lrDoc.exists) {
-        await _firestore.collection('leave_requests').doc(docId).delete();
-        print('[Firebase Service] ✓ Deleted from leave_requests: $docId');
-        return;
-      }
-      print('[Firebase Service] ⚠ Document not found in any collection: $docId');
+      // Try deleting from both collections in parallel
+      // (delete on non-existent doc is a no-op, not an error)
+      await Future.wait([
+        _firestore
+            .collection('gate_passes')
+            .doc(docId)
+            .delete()
+            .then((_) {
+              print('[Firebase Service] ✓ Deleted from gate_passes: $docId');
+            })
+            .catchError((e) {
+              print('[Firebase Service] gate_passes delete error: $e');
+            }),
+        _firestore
+            .collection('leave_requests')
+            .doc(docId)
+            .delete()
+            .then((_) {
+              print('[Firebase Service] ✓ Deleted from leave_requests: $docId');
+            })
+            .catchError((e) {
+              print('[Firebase Service] leave_requests delete error: $e');
+            }),
+      ]);
+      print('[Firebase Service] ✓ Delete complete for: $docId');
     } catch (e) {
-      print('[Firebase Service] Error deleting $docId: $e');
+      print('[Firebase Service] ✗ Error deleting $docId: $e');
     }
   }
 
-  /// Fetch student data by Firestore document ID (the key received on port 9000)
-  /// Checks both gate_passes and leave_requests collections
-  /// Retries if critical fields are empty after normalization
+  /// Fetch student data by Firestore document ID (the key received from scanner)
+  /// Checks both gate_passes and leave_requests collections IN PARALLEL
+  /// Retries only the found collection if critical fields are empty
   Future<Map<String, dynamic>?> fetchByDocumentId(String docId) async {
     try {
       print('[Firebase Service] Starting fetch for docId: $docId');
-      int retryCount = 0;
-      const int maxRetries = 2;
 
-      while (retryCount <= maxRetries) {
-        if (retryCount > 0) {
-          print(
-            '[Firebase Service] Retrying fetch (attempt ${retryCount + 1}/$maxRetries) for docId: $docId',
-          );
-        }
+      // Query BOTH collections in parallel to cut latency in half
+      print(
+        '[Firebase Service] Querying gate_passes + leave_requests in parallel...',
+      );
+      final results = await Future.wait([
+        _firestore.collection('gate_passes').doc(docId).get(),
+        _firestore.collection('leave_requests').doc(docId).get(),
+      ]);
 
-        // Try to fetch from gate_passes collection
-        print('[Firebase Service] Querying gate_passes collection...');
-        final gatePassDoc = await _firestore
-            .collection('gate_passes')
-            .doc(docId)
-            .get();
+      final gatePassDoc = results[0];
+      final leaveDoc = results[1];
 
-        if (gatePassDoc.exists) {
-          final gatePassData = gatePassDoc.data() as Map<String, dynamic>;
-          print('[Firebase Service] ✓ Found in gate_passes collection');
-          print('[Firebase Service] Raw data: $gatePassData');
-          // Use the correct normalizer based on the document's type
-          final docType = (gatePassData['type']?.toString() ?? '').toLowerCase();
-          final normalized = docType.contains('leave')
-              ? _normalizeLeaveRequestData(gatePassData)
-              : _normalizeGatePassData(gatePassData);
-          print('[Firebase Service] Normalized data: $normalized');
+      // Determine which collection has the document
+      String? foundCollection;
+      Map<String, dynamic>? rawData;
 
-          // Check if critical fields are populated
-          if (_isValidNormalizedData(normalized)) {
-            print('[Firebase Service] ✓ Normalized data has required fields');
-            return normalized;
-          } else {
-            print(
-              '[Firebase Service] ⚠ Critical fields are empty in normalized data',
-            );
-            if (retryCount < maxRetries) {
-              retryCount++;
-              await Future.delayed(Duration(milliseconds: 500));
-              continue;
-            }
-            return normalized; // Return even if empty after retries
-          }
-        }
-
+      if (gatePassDoc.exists) {
+        foundCollection = 'gate_passes';
+        rawData = gatePassDoc.data() as Map<String, dynamic>;
+        print('[Firebase Service] ✓ Found in gate_passes collection');
+      } else if (leaveDoc.exists) {
+        foundCollection = 'leave_requests';
+        rawData = leaveDoc.data() as Map<String, dynamic>;
+        print('[Firebase Service] ✓ Found in leave_requests collection');
+      } else {
         print(
-          '[Firebase Service] Not found in gate_passes, checking leave_requests...',
+          '[Firebase Service] ✗ Document not found in any collection for docId: $docId',
         );
-        // If not found in gate_passes, try leave_requests
-        final leaveDoc = await _firestore
-            .collection('leave_requests')
-            .doc(docId)
-            .get();
-
-        if (leaveDoc.exists) {
-          final leaveData = leaveDoc.data() as Map<String, dynamic>;
-          print('[Firebase Service] ✓ Found in leave_requests collection');
-          print('[Firebase Service] Raw data: $leaveData');
-          final normalized = _normalizeLeaveRequestData(leaveData);
-          print('[Firebase Service] Normalized data: $normalized');
-
-          // Check if critical fields are populated
-          if (_isValidNormalizedData(normalized)) {
-            print('[Firebase Service] ✓ Normalized data has required fields');
-            return normalized;
-          } else {
-            print(
-              '[Firebase Service] ⚠ Critical fields are empty in normalized data',
-            );
-            if (retryCount < maxRetries) {
-              retryCount++;
-              await Future.delayed(Duration(milliseconds: 500));
-              continue;
-            }
-            return normalized; // Return even if empty after retries
-          }
-        }
-
-        // Document not found, break retry loop
-        if (retryCount == 0) {
-          print(
-            '[Firebase Service] ✗ Document not found in any collection for docId: $docId',
-          );
-          return null;
-        }
-        retryCount++;
+        return null;
       }
 
-      return null;
+      print('[Firebase Service] Raw data: $rawData');
+
+      // Normalize based on collection/type
+      Map<String, dynamic> normalized;
+      if (foundCollection == 'leave_requests') {
+        normalized = _normalizeLeaveRequestData(rawData);
+      } else {
+        final docType = (rawData['type']?.toString() ?? '').toLowerCase();
+        normalized = docType.contains('leave')
+            ? _normalizeLeaveRequestData(rawData)
+            : _normalizeGatePassData(rawData);
+      }
+      print('[Firebase Service] Normalized data: $normalized');
+
+      // Check if critical fields are populated
+      if (_isValidNormalizedData(normalized)) {
+        print('[Firebase Service] ✓ Normalized data has required fields');
+        return normalized;
+      }
+
+      // Retry only the found collection (up to 2 retries with 300ms delay)
+      print(
+        '[Firebase Service] ⚠ Critical fields empty — retrying $foundCollection...',
+      );
+      for (int retry = 1; retry <= 2; retry++) {
+        await Future.delayed(const Duration(milliseconds: 300));
+        print('[Firebase Service] Retry $retry/2 for $foundCollection...');
+
+        final retryDoc = await _firestore
+            .collection(foundCollection)
+            .doc(docId)
+            .get();
+        if (!retryDoc.exists) break;
+
+        final retryData = retryDoc.data() as Map<String, dynamic>;
+        if (foundCollection == 'leave_requests') {
+          normalized = _normalizeLeaveRequestData(retryData);
+        } else {
+          final docType = (retryData['type']?.toString() ?? '').toLowerCase();
+          normalized = docType.contains('leave')
+              ? _normalizeLeaveRequestData(retryData)
+              : _normalizeGatePassData(retryData);
+        }
+
+        if (_isValidNormalizedData(normalized)) {
+          print('[Firebase Service] ✓ Retry $retry succeeded');
+          return normalized;
+        }
+      }
+
+      print(
+        '[Firebase Service] Returning data after retries (may have empty fields)',
+      );
+      return normalized;
     } catch (e) {
       print('[Firebase Service] ✗ ERROR fetching docId "$docId": $e');
       return null;
@@ -224,8 +232,8 @@ class FirebaseService {
     final String rollno = (data['rollNumber']?.toString() ?? '').isNotEmpty
         ? data['rollNumber'].toString()
         : (data['rollno']?.toString() ?? '').isNotEmpty
-            ? data['rollno'].toString()
-            : parsedName['rollno']!;
+        ? data['rollno'].toString()
+        : parsedName['rollno']!;
 
     // Always use parsed name (just the name part, not rollno_name)
     final String name = parsedName['name']!.isNotEmpty
@@ -277,9 +285,18 @@ class FirebaseService {
       ];
 
       final months = {
-        'january': 1, 'february': 2, 'march': 3, 'april': 4,
-        'may': 5, 'june': 6, 'july': 7, 'august': 8,
-        'september': 9, 'october': 10, 'november': 11, 'december': 12,
+        'january': 1,
+        'february': 2,
+        'march': 3,
+        'april': 4,
+        'may': 5,
+        'june': 6,
+        'july': 7,
+        'august': 8,
+        'september': 9,
+        'october': 10,
+        'november': 11,
+        'december': 12,
       };
 
       for (final pattern in patterns) {
@@ -313,7 +330,9 @@ class FirebaseService {
   /// Normalize leave_requests data to QRAuthenticator format
   Map<String, dynamic> _normalizeLeaveRequestData(Map<String, dynamic> data) {
     print('[LEAVE NORMALIZE] All keys in data: ${data.keys.toList()}');
-    print('[LEAVE NORMALIZE] leavingTime=${data['leavingTime']}, leavingDate=${data['leavingDate']}, leaving=${data['leaving']}');
+    print(
+      '[LEAVE NORMALIZE] leavingTime=${data['leavingTime']}, leavingDate=${data['leavingDate']}, leaving=${data['leaving']}',
+    );
     // Extract rollno and name from combined name field if available
     final Map<String, String> parsedName = _parseNameField(
       data['name']?.toString() ?? '',
@@ -323,8 +342,8 @@ class FirebaseService {
     final String rollno = (data['rollNumber']?.toString() ?? '').isNotEmpty
         ? data['rollNumber'].toString()
         : (data['rollno']?.toString() ?? '').isNotEmpty
-            ? data['rollno'].toString()
-            : parsedName['rollno']!;
+        ? data['rollno'].toString()
+        : parsedName['rollno']!;
 
     // Always use parsed name (just the name part, not rollno_name)
     final String name = parsedName['name']!.isNotEmpty
@@ -332,7 +351,8 @@ class FirebaseService {
         : data['name']?.toString() ?? '';
 
     // Address: use addressDuringLeave (actual Firebase field), fall back to address
-    final String address = (data['addressDuringLeave']?.toString() ?? '').isNotEmpty
+    final String address =
+        (data['addressDuringLeave']?.toString() ?? '').isNotEmpty
         ? data['addressDuringLeave'].toString()
         : data['address']?.toString() ?? '';
 

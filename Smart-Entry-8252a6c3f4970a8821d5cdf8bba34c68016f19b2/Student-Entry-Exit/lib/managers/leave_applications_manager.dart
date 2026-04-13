@@ -17,6 +17,10 @@ class LeaveApplicationsManager {
   /// with the _docId so Firebase document can be deleted
   Function(String docId)? onEntryComplete;
 
+  /// Cooldown: track last scan time per student to prevent accidental double-scans
+  final Map<String, DateTime> _lastScanTime = {};
+  static const _scanCooldown = Duration(seconds: 60);
+
   List<Map<String, dynamic>> get rows => _leaveApps;
 
   /// Try to parse leave application from String or Map. Returns normalized map or null.
@@ -113,6 +117,18 @@ class LeaveApplicationsManager {
     _log('[LEAVE MANAGER] name=$name, id=$id, phone=$phone');
     _log('[LEAVE MANAGER] Current total rows: ${_leaveApps.length}');
 
+    // Cooldown: ignore duplicate scans within 1 minute for the same student
+    final scanKey = id ?? phone ?? name ?? '';
+    if (scanKey.isNotEmpty) {
+      final lastScan = _lastScanTime[scanKey];
+      if (lastScan != null && DateTime.now().difference(lastScan) < _scanCooldown) {
+        _log('[LEAVE MANAGER] ⚠ COOLDOWN: Ignoring duplicate scan for $scanKey (within 60s)');
+        logCallback?.call('Leave: duplicate scan ignored for $scanKey (60s cooldown)');
+        return;
+      }
+      _lastScanTime[scanKey] = DateTime.now();
+    }
+
     final existingIndex = findExistingRowIndex(_leaveApps, id, phone, name);
     _log('[LEAVE MANAGER] Found existing row at index: $existingIndex');
 
@@ -138,6 +154,16 @@ class LeaveApplicationsManager {
       if (prevReturning.trim().isEmpty) {
         // returning empty → fill it
         r['returning'] = now;
+        // Update address from incoming data (fresh from Firebase)
+        final addr = fields['address'];
+        if (addr != null && addr.toString().trim().isNotEmpty) {
+          r['address'] = addr;
+        }
+        // Calculate duration from leaving → returning
+        final leavingStr = (r['leaving']?.toString() ?? '').trim();
+        if (leavingStr.isNotEmpty) {
+          r['duration'] = _calculateDuration(leavingStr, now);
+        }
         _leaveApps[existingIndex] = Map<String, dynamic>.from(r);
         logCallback?.call(
           'Leave: set returning to $now for id=${id ?? phone ?? name}',
@@ -154,8 +180,11 @@ class LeaveApplicationsManager {
       } else {
         // both filled → start new row
         final newRow = Map<String, dynamic>.from(r);
+        newRow['leaving'] = now; // new session starts NOW
         newRow['returning'] = null;
+        newRow['duration'] = ''; // will be calculated when returning is filled
         newRow['receivedAt'] = now;
+        newRow['address'] = fields['address'] ?? r['address'];
         newRow['security'] = SecurityNameService().name;
         _leaveApps.add(newRow);
         logCallback?.call(
@@ -169,9 +198,11 @@ class LeaveApplicationsManager {
       return;
     }
 
-    // not found → add with leaving set, returning empty (preserve all fields)
+    // not found → add with leaving set to CURRENT TIME, returning empty
     final normalized = Map<String, dynamic>.from(fields);
+    normalized['leaving'] = shortDateTime(DateTime.now()); // scan time, not DB value
     normalized['returning'] = null;
+    normalized['duration'] = ''; // will be calculated when returning is filled
     normalized['receivedAt'] = shortDateTime(DateTime.now());
     normalized['security'] = SecurityNameService().name;
     _log('[LEAVE MANAGER] Creating new row: $normalized');
@@ -186,6 +217,28 @@ class LeaveApplicationsManager {
   /// Helper method for logging
   void _log(String message) {
     logCallback?.call(message);
+  }
+
+  /// Calculate duration between leaving time string and returning time string.
+  /// Returns human-readable string like "2h 35m" or "45m".
+  String _calculateDuration(String leavingStr, String returningStr) {
+    try {
+      // Parse "2026-04-11 22:05" format
+      final leavingDt = DateTime.tryParse(leavingStr.replaceFirst(' ', 'T'));
+      final returningDt = DateTime.tryParse(returningStr.replaceFirst(' ', 'T'));
+      if (leavingDt == null || returningDt == null) return '';
+      final diff = returningDt.difference(leavingDt);
+      if (diff.isNegative) return '';
+      final hours = diff.inHours;
+      final minutes = diff.inMinutes % 60;
+      if (hours > 0) {
+        return '${hours}h ${minutes}m';
+      }
+      return '${minutes}m';
+    } catch (e) {
+      debugPrint('[LEAVE MANAGER] Duration calc error: $e');
+      return '';
+    }
   }
 
   /// Save current rows to local storage
@@ -265,5 +318,24 @@ class LeaveApplicationsManager {
     _leaveApps.clear();
     notifier.value = [];
     LocalStorageService().delete('leave');
+  }
+
+  /// Remove only completed entries (both leaving AND returning filled).
+  /// Incomplete entries survive midnight and stay on screen.
+  void clearCompleted() {
+    final before = _leaveApps.length;
+    _leaveApps.removeWhere((row) {
+      final leaving = (row['leaving']?.toString() ?? '').trim();
+      final returning = (row['returning']?.toString() ?? '').trim();
+      return leaving.isNotEmpty && returning.isNotEmpty;
+    });
+    final removed = before - _leaveApps.length;
+    _log('[LEAVE MANAGER] clearCompleted: removed $removed completed, keeping ${_leaveApps.length} incomplete');
+    notifier.value = List<Map<String, dynamic>>.from(_leaveApps);
+    if (_leaveApps.isEmpty) {
+      LocalStorageService().delete('leave');
+    } else {
+      _save();
+    }
   }
 }

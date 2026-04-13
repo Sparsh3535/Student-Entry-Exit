@@ -1,7 +1,9 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:file_picker/file_picker.dart';
 import '../managers/day_scholar_manager.dart';
 import '../managers/hostel_manager.dart';
 import '../managers/leave_applications_manager.dart';
@@ -34,6 +36,9 @@ class _HomeScreenState extends State<HomeScreen> {
   final FocusNode _scannerFocusNode = FocusNode();
   final TextEditingController _scannerController = TextEditingController();
   Timer? _scannerFocusTimer; // periodic safety net to keep scanner focused
+  Timer? _midnightTimer; // auto-reset at midnight
+  String _currentDate = ''; // track current date for midnight detection
+  bool _csvExportedForCurrentDate = false; // tracks if 11:30 PM CSV export succeeded
 
   // console logs
   final List<String> _logs = [];
@@ -143,14 +148,119 @@ class _HomeScreenState extends State<HomeScreen> {
 
     // Step 3: Now load saved data (CSV path is available for export)
     await _loadSavedData();
+
+    // Step 4: Start midnight auto-reset timer
+    _startMidnightTimer();
   }
 
   @override
   void dispose() {
     _scannerFocusTimer?.cancel();
+    _midnightTimer?.cancel();
     _scannerFocusNode.dispose();
     _scannerController.dispose();
     super.dispose();
+  }
+
+  /// Start a periodic timer that checks every 30 seconds.
+  /// Phase 1 (11:30 PM): Export all in-memory data to CSV. Retries every 30s if failed.
+  /// Phase 2 (12:00 AM): Last-chance export if needed, then clear screen data.
+  ///   - Day Scholar & Hostel: clear everything
+  ///   - Leave: clear only completed entries (incomplete survive midnight)
+  void _startMidnightTimer() {
+    final now = DateTime.now();
+    String two(int n) => n.toString().padLeft(2, '0');
+    _currentDate = '${now.year}-${two(now.month)}-${two(now.day)}';
+    _log('[TIMER] Started — current date: $_currentDate');
+
+    _midnightTimer = Timer.periodic(const Duration(seconds: 30), (_) async {
+      final now = DateTime.now();
+      final today = '${now.year}-${two(now.month)}-${two(now.day)}';
+
+      // ── Phase 1: 11:30 PM — Export CSV (retry every 30s until midnight) ──
+      if (now.hour == 23 && now.minute >= 30 && !_csvExportedForCurrentDate && today == _currentDate) {
+        _log('[PRE-MIDNIGHT] 11:30 PM window — exporting CSV backup...');
+        final success = await _exportAllCsv(_currentDate);
+        if (success) {
+          _csvExportedForCurrentDate = true;
+          _log('[PRE-MIDNIGHT] ✓ All CSV exports successful — safe to clear at midnight');
+        } else {
+          _log('[PRE-MIDNIGHT] ⚠ CSV export failed — will retry in 30s');
+        }
+      }
+
+      // ── Phase 2: Midnight — Last-chance export + clear ──
+      if (today != _currentDate) {
+        final yesterday = _currentDate;
+        _currentDate = today;
+
+        // Last-chance CSV export if 11:30 PM export never succeeded
+        if (!_csvExportedForCurrentDate) {
+          _log('[MIDNIGHT] ⚠ CSV was NOT exported during 11:30 PM window — attempting final export...');
+          final success = await _exportAllCsv(yesterday);
+          _log('[MIDNIGHT] Final export: ${success ? "✓ SUCCESS" : "✗ FAILED — data may be lost"}');
+        }
+
+        _csvExportedForCurrentDate = false; // reset flag for new day
+
+        // Clear screen data
+        _dayScholarManager.clear();
+        _hostelManager.clear();
+        // Leave: only clear completed entries — incomplete ones survive midnight
+        _leaveManager.clearCompleted();
+
+        _log('[MIDNIGHT RESET] ✓ Day scholar & hostel cleared, leave completed entries cleared for new day ($today)');
+      }
+    });
+  }
+
+  /// Export all manager data to CSV. Returns true if ALL exports succeed.
+  Future<bool> _exportAllCsv(String date) async {
+    final csvService = CsvService();
+    if (!csvService.isPathConfigured) {
+      _log('[CSV EXPORT] ⚠ CSV path not configured — cannot export');
+      return false;
+    }
+
+    bool allSucceeded = true;
+
+    // Day Scholar
+    if (_dayScholarManager.rows.isNotEmpty) {
+      final path = await csvService.exportToCsv(
+        managerName: 'day_scholar',
+        date: date,
+        rows: List<Map<String, dynamic>>.from(_dayScholarManager.rows),
+        columns: CsvService.dayScholarColumns,
+      );
+      if (path == null) allSucceeded = false;
+      _log('[CSV EXPORT] Day Scholar (${_dayScholarManager.rows.length} rows): ${path ?? "FAILED"}');
+    }
+
+    // Hostel
+    if (_hostelManager.rows.isNotEmpty) {
+      final path = await csvService.exportToCsv(
+        managerName: 'hostel',
+        date: date,
+        rows: List<Map<String, dynamic>>.from(_hostelManager.rows),
+        columns: CsvService.hostelColumns,
+      );
+      if (path == null) allSucceeded = false;
+      _log('[CSV EXPORT] Hostel (${_hostelManager.rows.length} rows): ${path ?? "FAILED"}');
+    }
+
+    // Leave
+    if (_leaveManager.rows.isNotEmpty) {
+      final path = await csvService.exportToCsv(
+        managerName: 'leave',
+        date: date,
+        rows: List<Map<String, dynamic>>.from(_leaveManager.rows),
+        columns: CsvService.leaveColumns,
+      );
+      if (path == null) allSucceeded = false;
+      _log('[CSV EXPORT] Leave (${_leaveManager.rows.length} rows): ${path ?? "FAILED"}');
+    }
+
+    return allSucceeded;
   }
 
   /// Load persisted data from all managers.
@@ -182,9 +292,12 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   /// Show dialog to set CSV save path
+  /// On Android: uses system folder picker
+  /// On Windows: uses text input for folder path
   void _showCsvPathDialog({VoidCallback? onDone}) {
     final pathController = TextEditingController();
     String? errorText;
+    final isAndroid = Platform.isAndroid;
 
     showDialog(
       context: context,
@@ -198,34 +311,93 @@ class _HomeScreenState extends State<HomeScreen> {
             children: const [
               Icon(Icons.folder_open, color: Colors.deepPurple, size: 28),
               SizedBox(width: 12),
-              Text('Set CSV Save Path'),
+              Flexible(child: Text('Set CSV Save Path')),
             ],
           ),
           content: SizedBox(
-            width: 500,
+            width: isAndroid ? double.maxFinite : 500,
             child: Column(
               mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                const Text(
-                  'Enter the folder path where attendance CSV files will be saved.\n'
-                  'Subfolders (day_scholar, hostel, leave_application) will be created automatically.',
-                  style: TextStyle(color: Colors.grey, fontSize: 13),
+                Text(
+                  isAndroid
+                      ? 'Choose a folder on your device where attendance CSV files will be saved.\n'
+                        'Subfolders (day_scholar, hostel, leave_application) will be created automatically.'
+                      : 'Enter the folder path where attendance CSV files will be saved.\n'
+                        'Subfolders (day_scholar, hostel, leave_application) will be created automatically.',
+                  style: const TextStyle(color: Colors.grey, fontSize: 13),
                 ),
                 const SizedBox(height: 16),
-                TextField(
-                  controller: pathController,
-                  decoration: InputDecoration(
-                    hintText: r'e.g. C:\Users\spars\Desktop\Attendance',
-                    prefixIcon: const Icon(Icons.folder),
-                    errorText: errorText,
-                    border: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(12),
+                if (isAndroid) ...[
+                  // Android: show selected path + browse button
+                  if (pathController.text.isNotEmpty)
+                    Container(
+                      padding: const EdgeInsets.all(12),
+                      decoration: BoxDecoration(
+                        color: Colors.green.shade50,
+                        borderRadius: BorderRadius.circular(8),
+                        border: Border.all(color: Colors.green.shade200),
+                      ),
+                      child: Row(
+                        children: [
+                          const Icon(Icons.check_circle, color: Colors.green, size: 20),
+                          const SizedBox(width: 8),
+                          Expanded(
+                            child: Text(
+                              pathController.text,
+                              style: const TextStyle(fontSize: 13),
+                              overflow: TextOverflow.ellipsis,
+                              maxLines: 2,
+                            ),
+                          ),
+                        ],
+                      ),
                     ),
-                    filled: true,
-                    fillColor: Colors.grey.shade100,
+                  if (errorText != null)
+                    Padding(
+                      padding: const EdgeInsets.only(top: 8),
+                      child: Text(errorText!, style: TextStyle(color: Colors.red.shade700, fontSize: 13)),
+                    ),
+                  const SizedBox(height: 12),
+                  SizedBox(
+                    width: double.infinity,
+                    child: ElevatedButton.icon(
+                      icon: const Icon(Icons.folder_open),
+                      label: Text(pathController.text.isEmpty ? 'Browse Folder' : 'Change Folder'),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: Colors.deepPurple,
+                        foregroundColor: Colors.white,
+                        padding: const EdgeInsets.symmetric(vertical: 14),
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                      ),
+                      onPressed: () async {
+                        final result = await FilePicker.platform.getDirectoryPath();
+                        if (result != null) {
+                          setDialogState(() {
+                            pathController.text = result;
+                            errorText = null;
+                          });
+                        }
+                      },
+                    ),
                   ),
-                ),
+                ] else ...[
+                  // Windows: text field input
+                  TextField(
+                    controller: pathController,
+                    decoration: InputDecoration(
+                      hintText: r'e.g. C:\Users\spars\Desktop\Attendance',
+                      prefixIcon: const Icon(Icons.folder),
+                      errorText: errorText,
+                      border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      filled: true,
+                      fillColor: Colors.grey.shade100,
+                    ),
+                  ),
+                ],
               ],
             ),
           ),
@@ -249,7 +421,9 @@ class _HomeScreenState extends State<HomeScreen> {
                 final path = pathController.text.trim();
                 if (path.isEmpty) {
                   setDialogState(
-                    () => errorText = 'Please enter a folder path',
+                    () => errorText = isAndroid
+                        ? 'Please select a folder first'
+                        : 'Please enter a folder path',
                   );
                   return;
                 }
@@ -265,7 +439,7 @@ class _HomeScreenState extends State<HomeScreen> {
                 } else {
                   setDialogState(
                     () => errorText =
-                        'Path does not exist. Please enter a valid folder path.',
+                        'Could not access this folder. Please choose another one.',
                   );
                 }
               },
@@ -280,24 +454,33 @@ class _HomeScreenState extends State<HomeScreen> {
   void _log(String s) {
     final line = '${DateTime.now().toIso8601String()} - $s';
     debugPrint(line);
-    setState(() {
-      _logs.insert(0, line);
-      if (_logs.length > 2000) _logs.removeRange(2000, _logs.length);
-    });
+    if (!mounted) return; // Prevent crash if widget is disposed
+    try {
+      setState(() {
+        _logs.insert(0, line);
+        if (_logs.length > 2000) _logs.removeRange(2000, _logs.length);
+      });
+    } catch (e) {
+      debugPrint('[_log error] $e');
+    }
   }
 
   /// Handle QR scanner keyboard input (fired when Enter key is pressed)
   void _onScannerInput(String value) {
-    final trimmed = value.trim();
-    if (trimmed.isNotEmpty) {
-      _log('[SCANNER] Received scan input (${trimmed.length} chars): ${trimmed.length > 200 ? '${trimmed.substring(0, 200)}...' : trimmed}');
-      _processBufferLine(trimmed);
+    try {
+      final trimmed = value.trim();
+      if (trimmed.isNotEmpty) {
+        _log('[SCANNER] Received scan input (${trimmed.length} chars): ${trimmed.length > 200 ? '${trimmed.substring(0, 200)}...' : trimmed}');
+        _processBufferLine(trimmed);
+      }
+      _scannerController.clear();
+      // Re-focus to be ready for next scan
+      Future.microtask(() {
+        if (mounted) _scannerFocusNode.requestFocus();
+      });
+    } catch (e) {
+      debugPrint('[SCANNER ERROR] $e');
     }
-    _scannerController.clear();
-    // Re-focus to be ready for next scan
-    Future.microtask(() {
-      if (mounted) _scannerFocusNode.requestFocus();
-    });
   }
 
   /// Process individual line - either JSON or Firebase key lookup
@@ -365,52 +548,30 @@ class _HomeScreenState extends State<HomeScreen> {
   /// Fetch student data from Firebase by document ID and process it
   Future<void> _fetchAndProcessFromFirebase(String docId) async {
     try {
+      final totalSw = Stopwatch()..start();
       _log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
-      _log('[PORT 9000] KEY RECEIVED: $docId');
+      _log('[SCANNER] KEY RECEIVED: $docId');
       _log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
 
       _log('[FIREBASE] Fetching document from database...');
+      final fetchSw = Stopwatch()..start();
       final studentData = await _firebaseService.fetchByDocumentId(docId);
+      fetchSw.stop();
+      _log('[TIMING] Firebase fetch took: ${fetchSw.elapsedMilliseconds}ms');
 
       if (studentData != null) {
-        _log('');
-        _log('✓✓✓ FIREBASE FETCH SUCCESSFUL ✓✓✓');
-        _log('[DATA] Type: ${studentData['type']}');
-        _log('[DATA] Name: ${studentData['name']}');
-        _log('[DATA] ID/RollNo: ${studentData['id']}');
-        _log('[DATA] Phone: ${studentData['phone']}');
-        _log('[DATA] Location: ${studentData['location']}');
-        _log('[DATA] Status: ${studentData['status']}');
-
-        _log('');
-        _log('[FULL DATA OBJECT]:');
-        _log('[TYPE]: ${studentData['type']}');
-        _log('[NAME]: ${studentData['name']}');
-        _log('[ID]: ${studentData['id']}');
-        _log('[ROLLNO]: ${studentData['rollno']}');
-        _log('[PHONE]: ${studentData['phone']}');
-        _log('[DEGREE]: ${studentData['degree']}');
-        _log('[STATUS]: ${studentData['status']}');
-        _log('[DESTINATION]: ${studentData['destination']}');
-        _log('[HOSTEL]: ${studentData['hostel']}');
-        _log('[ROOM_NUMBER]: ${studentData['roomNumber']}');
-        _log('[LOCATION]: ${studentData['location']}');
-        _log('[CREATED_AT]: ${studentData['createdAt']}');
-        _log('[SCAN_COUNT]: ${studentData['scanCount']}');
-        _log('[SECURITY]: ${studentData['security']}');
+        _log('✓ FIREBASE FETCH SUCCESSFUL');
+        _log('[DATA] Type: ${studentData['type']}, Name: ${studentData['name']}, ID: ${studentData['id']}');
 
         // Pass the fetched data directly to QRAuthenticator as a Map
-        // (no JSON encode/decode round-trip — avoids issues with non-serializable values)
-        _log('');
-        _log(
-          '[ROUTING] Passing data directly to QRAuthenticator for processing...',
-        );
-
         studentData['_docId'] = docId;
-        _log('[DOCID] Set _docId=$docId on studentData');
+        final routeSw = Stopwatch()..start();
         _qrAuthenticator.processMap(studentData);
+        routeSw.stop();
+        _log('[TIMING] QR routing + manager processing took: ${routeSw.elapsedMilliseconds}ms');
 
-        _log('✓ Processing complete');
+        totalSw.stop();
+        _log('[TIMING] ✓ Total pipeline: ${totalSw.elapsedMilliseconds}ms');
       } else {
         _log('');
         _log('✗✗✗ FIREBASE FETCH FAILED ✗✗✗');
@@ -425,18 +586,6 @@ class _HomeScreenState extends State<HomeScreen> {
       _log('✗✗✗ ERROR DURING FIREBASE LOOKUP ✗✗✗');
       _log('✗ Firebase lookup failed for docId "$docId": $e');
     }
-  }
-
-  void _clear() {
-    setState(() {
-      _hostelManager.clear();
-      _dayScholarManager.clear();
-      _leaveManager.clear();
-      _logs.insert(
-        0,
-        '${DateTime.now().toIso8601String()} - All tables cleared',
-      );
-    });
   }
 
   // Left navigation pane
@@ -948,23 +1097,7 @@ class _HomeScreenState extends State<HomeScreen> {
                     height: 300,
                     width: double.infinity,
                     padding: const EdgeInsets.all(8.0),
-                    child: Column(
-                      children: [
-                        Expanded(child: _buildConsoleView(showControls: false)),
-                        const SizedBox(height: 8),
-                        Row(
-                          children: [
-                            const Spacer(),
-                            ElevatedButton.icon(
-                              icon: const Icon(Icons.clear_all),
-                              label: const Text('Clear All Data'),
-                              onPressed: _clear,
-                            ),
-                            const SizedBox(width: 8),
-                          ],
-                        ),
-                      ],
-                    ),
+                    child: _buildConsoleView(showControls: false),
                   ),
                 ),
               ],
@@ -989,7 +1122,7 @@ class _HomeScreenState extends State<HomeScreen> {
           icon: const Icon(Icons.menu),
           onPressed: () => _scaffoldKey.currentState?.openDrawer(),
         ),
-        title: const Text('Hostel Entry/Out'),
+        title: const Text('Security Portal'),
         actions: const [], // no top-right actions
       ),
       body: Padding(

@@ -1,6 +1,7 @@
 import 'dart:io';
 import 'dart:convert';
 import 'package:flutter/foundation.dart';
+import 'app_directory.dart';
 
 /// Stores the current security guard name locally.
 /// Only one name is stored at a time — saving a new name erases the old one.
@@ -17,10 +18,9 @@ class SecurityNameService {
   /// Whether a name has been set
   bool get isSet => _name.isNotEmpty;
 
-  /// Config file path (next to the executable)
+  /// Config file path (platform-aware)
   File get _configFile {
-    final exeDir = File(Platform.resolvedExecutable).parent;
-    return File('${exeDir.path}${Platform.pathSeparator}data${Platform.pathSeparator}security_name.json');
+    return File('${AppDirectory.path}${Platform.pathSeparator}security_name.json');
   }
 
   /// Load the saved name from disk

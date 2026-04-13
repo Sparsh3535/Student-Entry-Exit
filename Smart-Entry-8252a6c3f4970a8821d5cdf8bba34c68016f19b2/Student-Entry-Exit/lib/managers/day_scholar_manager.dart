@@ -16,6 +16,10 @@ class DayScholarManager {
   /// with the _docId so Firebase document can be deleted
   Function(String docId)? onEntryComplete;
 
+  /// Cooldown: track last scan time per student to prevent accidental double-scans
+  final Map<String, DateTime> _lastScanTime = {};
+  static const _scanCooldown = Duration(seconds: 10);
+
   List<Map<String, dynamic>> get rows => _dayRows;
 
   /// Insert or update day-scholar rows:
@@ -32,6 +36,18 @@ class DayScholarManager {
 
     _log('[DAY SCHOLAR MANAGER] name=$name, id=$id, phone=$phone');
     _log('[DAY SCHOLAR MANAGER] Current total rows: ${_dayRows.length}');
+
+    // Cooldown: ignore duplicate scans within 10 seconds for the same student
+    final scanKey = id ?? phone ?? name ?? '';
+    if (scanKey.isNotEmpty) {
+      final lastScan = _lastScanTime[scanKey];
+      if (lastScan != null && DateTime.now().difference(lastScan) < _scanCooldown) {
+        _log('[DAY SCHOLAR MANAGER] ⚠ COOLDOWN: Ignoring duplicate scan for $scanKey (within 10s)');
+        logCallback?.call('DayScholar: duplicate scan ignored for $scanKey (10s cooldown)');
+        return;
+      }
+      _lastScanTime[scanKey] = DateTime.now();
+    }
 
     final existingIndex = findExistingRowIndex(_dayRows, id, phone, name);
     _log('[DAY SCHOLAR MANAGER] Found existing row at index: $existingIndex');
@@ -50,6 +66,10 @@ class DayScholarManager {
       if (prevIn.trim().isEmpty) {
         // first event -> set intime
         r['intime'] = now;
+        final loc = fields['location'];
+        if (loc != null && loc.toString().trim().isNotEmpty) {
+          r['location'] = loc;
+        }
         _dayRows[existingIndex] = Map<String, dynamic>.from(r);
         logCallback?.call(
           'DayScholar: set intime to $now for id=${id ?? phone ?? name}',
@@ -57,6 +77,10 @@ class DayScholarManager {
       } else if (prevOut.trim().isEmpty) {
         // intime exists and outtime empty -> set outtime
         r['outtime'] = now;
+        final loc = fields['location'];
+        if (loc != null && loc.toString().trim().isNotEmpty) {
+          r['location'] = loc;
+        }
         _dayRows[existingIndex] = Map<String, dynamic>.from(r);
         logCallback?.call(
           'DayScholar: set outtime to $now for id=${id ?? phone ?? name}',
@@ -71,6 +95,7 @@ class DayScholarManager {
         final newRow = Map<String, dynamic>.from(r);
         newRow['intime'] = now;
         newRow['outtime'] = null;
+        newRow['location'] = fields['location'] ?? r['location'];
         newRow['security'] = SecurityNameService().name;
         _dayRows.add(newRow);
         logCallback?.call(

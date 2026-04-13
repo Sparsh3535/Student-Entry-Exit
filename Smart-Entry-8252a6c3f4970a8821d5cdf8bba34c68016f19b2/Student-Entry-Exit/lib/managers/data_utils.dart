@@ -15,13 +15,18 @@ String? firstString(Map<String, dynamic> m, List<String> keys) {
   return null;
 }
 
-// Check if person already exists in target list (by id -> phone -> name)
+// Check if person already exists in target list (by id -> phone -> name).
+// Prefers the most recent INCOMPLETE row (one that still needs outtime/returning).
+// Falls back to last completed row only if no incomplete match is found.
 int findExistingRowIndex(
   List<Map<String, dynamic>> target,
   String? id,
   String? phone,
   String? name,
 ) {
+  int lastIncomplete = -1;
+  int lastComplete = -1;
+
   for (var i = target.length - 1; i >= 0; i--) {
     final r = target[i];
     final sameById = id != null && r['id'] != null && r['id'].toString() == id;
@@ -37,10 +42,21 @@ int findExistingRowIndex(
         r['name'].toString() == name;
 
     if (sameById || sameByPhone || sameByName) {
-      return i;
+      // Check if this row is incomplete (missing outtime or returning)
+      final outtime = (r['outtime']?.toString() ?? '').trim();
+      final returning = (r['returning']?.toString() ?? '').trim();
+      final isIncomplete = outtime.isEmpty && returning.isEmpty;
+
+      if (isIncomplete && lastIncomplete < 0) {
+        lastIncomplete = i;
+      } else if (!isIncomplete && lastComplete < 0) {
+        lastComplete = i;
+      }
     }
   }
-  return -1;
+
+  // Prefer incomplete row (needs 2nd scan) over completed row (would start new session)
+  return lastIncomplete >= 0 ? lastIncomplete : lastComplete;
 }
 
 // Parse key:value block (string or Map) into lowercase key -> value map.

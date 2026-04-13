@@ -1,6 +1,7 @@
 import 'dart:io';
 import 'dart:convert';
 import 'package:flutter/foundation.dart';
+import 'app_directory.dart';
 
 /// Service to export manager data as CSV files before midnight reset.
 class CsvService {
@@ -12,10 +13,9 @@ class CsvService {
   /// Set via [setBasePath] on app startup.
   String? _basePath;
 
-  /// Get the config file path (next to the executable)
+  /// Get the config file path (platform-aware)
   File get _configFile {
-    final exeDir = File(Platform.resolvedExecutable).parent;
-    return File('${exeDir.path}${Platform.pathSeparator}data${Platform.pathSeparator}csv_path_config.json');
+    return File('${AppDirectory.path}${Platform.pathSeparator}csv_path_config.json');
   }
 
   /// Check if a base path has been configured
@@ -48,8 +48,19 @@ class CsvService {
   Future<bool> setBasePath(String path) async {
     final dir = Directory(path);
     if (!await dir.exists()) {
-      debugPrint('[CsvService] Path does not exist: $path');
-      return false;
+      // On Android, try to create the directory
+      if (Platform.isAndroid) {
+        try {
+          await dir.create(recursive: true);
+          debugPrint('[CsvService] Created directory on Android: $path');
+        } catch (e) {
+          debugPrint('[CsvService] Cannot create directory: $path — $e');
+          return false;
+        }
+      } else {
+        debugPrint('[CsvService] Path does not exist: $path');
+        return false;
+      }
     }
 
     _basePath = path;
@@ -141,9 +152,24 @@ class CsvService {
       final fileName = '${managerName}_$date.csv';
       final filePath = '$csvDir${Platform.pathSeparator}$fileName';
       final file = File(filePath);
-      await file.writeAsString(buffer.toString());
 
-      debugPrint('[CsvService] ✓ Exported ${rows.length} rows to: $filePath');
+      if (await file.exists()) {
+        // Append data rows (no header) to existing file
+        final dataBuffer = StringBuffer();
+        for (final row in rows) {
+          final values = columns.map((c) {
+            final key = c['key']!;
+            final val = row[key]?.toString() ?? '';
+            return _forceTextCsv(val);
+          });
+          dataBuffer.writeln(values.join(','));
+        }
+        await file.writeAsString(dataBuffer.toString(), mode: FileMode.append);
+        debugPrint('[CsvService] ✓ Appended ${rows.length} rows to existing: $filePath');
+      } else {
+        await file.writeAsString(buffer.toString());
+        debugPrint('[CsvService] ✓ Exported ${rows.length} rows to new: $filePath');
+      }
       return filePath;
     } catch (e) {
       debugPrint('[CsvService] Error exporting $managerName CSV: $e');
@@ -162,11 +188,21 @@ class CsvService {
   /// Force Excel to treat value as plain text by wrapping in ="value" format.
   /// This prevents Excel from interpreting phone numbers as scientific notation
   /// and date/time strings as dates.
+  /// The outer CSV quoting ensures commas/newlines inside values don't break columns.
   String _forceTextCsv(String value) {
     if (value.isEmpty) return '';
     // Escape any double quotes inside the value
     final escaped = value.replaceAll('"', '""');
-    return '="$escaped"';
+    // The ="" expression itself must be wrapped in CSV quotes
+    // if the value contains commas, newlines, or quotes — otherwise
+    // a comma inside the value (e.g. an address) breaks the CSV columns.
+    final inner = '="$escaped"';
+    if (value.contains(',') || value.contains('\n') || value.contains('\r') || value.contains('"')) {
+      // Wrap the entire ="" expression in outer double quotes for CSV
+      // Must escape the inner quotes for CSV: each " becomes ""
+      return '"${inner.replaceAll('"', '""')}"';
+    }
+    return inner;
   }
 
   /// Column definitions for Day Scholar

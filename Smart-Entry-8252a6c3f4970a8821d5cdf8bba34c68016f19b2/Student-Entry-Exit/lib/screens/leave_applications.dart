@@ -16,10 +16,12 @@ class LeaveApplicationsScreen extends StatefulWidget {
 class _LeaveApplicationsScreenState extends State<LeaveApplicationsScreen> {
   String _searchQuery = '';
   final _searchController = TextEditingController();
+  final _horizontalScrollController = ScrollController();
 
   @override
   void dispose() {
     _searchController.dispose();
+    _horizontalScrollController.dispose();
     super.dispose();
   }
 
@@ -112,8 +114,13 @@ class _LeaveApplicationsScreenState extends State<LeaveApplicationsScreen> {
                         );
                       }
 
-                      return SingleChildScrollView(
-                        scrollDirection: Axis.horizontal,
+                      return Scrollbar(
+                        controller: _horizontalScrollController,
+                        thumbVisibility: true,
+                        trackVisibility: true,
+                        child: SingleChildScrollView(
+                          controller: _horizontalScrollController,
+                          scrollDirection: Axis.horizontal,
                         child: Builder(
                           builder: (ctx) {
                             final screenWidth = MediaQuery.of(ctx).size.width - 48;
@@ -222,6 +229,7 @@ class _LeaveApplicationsScreenState extends State<LeaveApplicationsScreen> {
                               ),
                             );
                           },
+                        ),
                         ),
                       );
                     },

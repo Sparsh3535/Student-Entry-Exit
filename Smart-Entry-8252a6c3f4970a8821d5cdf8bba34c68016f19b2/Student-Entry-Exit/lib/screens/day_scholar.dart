@@ -13,10 +13,12 @@ class DayScholarScreen extends StatefulWidget {
 class _DayScholarScreenState extends State<DayScholarScreen> {
   String _searchQuery = '';
   final _searchController = TextEditingController();
+  final _horizontalScrollController = ScrollController();
 
   @override
   void dispose() {
     _searchController.dispose();
+    _horizontalScrollController.dispose();
     super.dispose();
   }
 
@@ -103,8 +105,13 @@ class _DayScholarScreenState extends State<DayScholarScreen> {
                           child: Text('No matching entries found.'),
                         );
                       }
-                      return SingleChildScrollView(
-                        scrollDirection: Axis.horizontal,
+                      return Scrollbar(
+                        controller: _horizontalScrollController,
+                        thumbVisibility: true,
+                        trackVisibility: true,
+                        child: SingleChildScrollView(
+                          controller: _horizontalScrollController,
+                          scrollDirection: Axis.horizontal,
                         child: Builder(
                           builder: (ctx) {
                             final screenWidth = MediaQuery.of(ctx).size.width - 48;
@@ -194,6 +201,7 @@ class _DayScholarScreenState extends State<DayScholarScreen> {
                               ),
                             );
                           },
+                        ),
                         ),
                       );
                     },

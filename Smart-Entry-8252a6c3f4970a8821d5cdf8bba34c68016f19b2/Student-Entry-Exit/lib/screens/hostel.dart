@@ -13,10 +13,12 @@ class HostelScreen extends StatefulWidget {
 class _HostelScreenState extends State<HostelScreen> {
   String _searchQuery = '';
   final _searchController = TextEditingController();
+  final _horizontalScrollController = ScrollController();
 
   @override
   void dispose() {
     _searchController.dispose();
+    _horizontalScrollController.dispose();
     super.dispose();
   }
 
@@ -99,8 +101,13 @@ class _HostelScreenState extends State<HostelScreen> {
                       if (filtered.isEmpty) {
                         return const Center(child: Text('No matching entries found.'));
                       }
-                      return SingleChildScrollView(
-                        scrollDirection: Axis.horizontal,
+                      return Scrollbar(
+                        controller: _horizontalScrollController,
+                        thumbVisibility: true,
+                        trackVisibility: true,
+                        child: SingleChildScrollView(
+                          controller: _horizontalScrollController,
+                          scrollDirection: Axis.horizontal,
                         child: Builder(
                           builder: (ctx) {
                             final screenWidth = MediaQuery.of(ctx).size.width - 48;
@@ -191,6 +198,7 @@ class _HostelScreenState extends State<HostelScreen> {
                               ),
                             );
                           },
+                        ),
                         ),
                       );
                     },

@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'csv_service.dart';
+import 'app_directory.dart';
 
 /// Singleton service for persisting manager data to local JSON files.
 /// Data is saved with today's date and auto-cleared on the next day (midnight reset).
@@ -10,11 +11,8 @@ class LocalStorageService {
   factory LocalStorageService() => _instance;
   LocalStorageService._();
 
-  /// Get the data directory (next to the executable)
-  Directory get _dataDir {
-    final exeDir = File(Platform.resolvedExecutable).parent;
-    return Directory('${exeDir.path}${Platform.pathSeparator}data');
-  }
+  /// Get the data directory (platform-aware)
+  Directory get _dataDir => Directory(AppDirectory.path);
 
   /// Get today's date as yyyy-MM-dd string (day resets at midnight).
   String get _today {
@@ -99,12 +97,18 @@ class LocalStorageService {
                   .map((k) => {'key': k, 'header': k})
                   .toList();
           }
-          await CsvService().exportToCsv(
+          final exportPath = await CsvService().exportToCsv(
             managerName: key,
             date: savedDate ?? 'unknown',
             rows: rows,
             columns: columns,
           );
+          if (exportPath == null) {
+            // CSV export failed (no path configured, or write error)
+            // DO NOT delete old data — keep it until export succeeds
+            debugPrint('[LocalStorage] ⚠ CSV export failed for "$key" — keeping old data to prevent data loss');
+            return rows;
+          }
         }
 
         await file.delete();

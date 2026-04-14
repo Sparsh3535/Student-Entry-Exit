@@ -125,201 +125,83 @@ class _LeaveApplicationsScreenState extends State<LeaveApplicationsScreen> {
     return id.contains(q) || name.contains(q);
   }
 
-  /// Show detail dialog when a row is tapped
+  /// Show a small popup with granted dates when a row is tapped
   void _showRowDetail(BuildContext context, Map<String, dynamic> a) {
-    final name = _cell(a, ['name', 'Name', 'full name', 'fullname']);
-    final roll = _cell(a, ['roll number', 'Roll Number', 'roll', 'id', 'Id', 'rollno']);
-    final phone = _cell(a, ['phone number', 'Phone Number', 'phone', 'mobile']);
-    final roomNumber = _cell(a, ['roomNumber', 'room_number', 'RoomNumber']);
-    final leaving = _cell(a, ['leaving', 'Leaving', 'from']);
-    final returning = _cell(a, ['returning', 'Returning', 'to']);
-    final duration = _cell(a, ['duration', 'Duration']);
-    final address = _cell(a, ['address', 'Address', 'addressDuringLeave', 'location', 'Location']);
-
     // Granted leave/return from Firebase
     final leavingDate = _cell(a, ['leavingDate']);
     final leavingTime = _cell(a, ['leavingTime']);
     final returnDate = _cell(a, ['returnDate']);
     final returnTime = _cell(a, ['returnTime']);
+    final isExtended = a['extended'] == true;
 
     final grantedLeave = [leavingDate, leavingTime].where((s) => s.isNotEmpty).join('  •  ');
     final grantedReturn = [returnDate, returnTime].where((s) => s.isNotEmpty).join('  •  ');
 
+    if (grantedLeave.isEmpty && grantedReturn.isEmpty) return;
+
     showDialog(
       context: context,
-      builder: (ctx) => Dialog(
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-        child: ConstrainedBox(
-          constraints: const BoxConstraints(maxWidth: 480),
-          child: Padding(
-            padding: const EdgeInsets.all(24),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                // Header
-                Row(
+      barrierColor: Colors.black12,
+      builder: (ctx) => Stack(
+        children: [
+          Positioned(
+            top: MediaQuery.of(ctx).size.height * 0.3,
+            left: MediaQuery.of(ctx).size.width * 0.25,
+            child: Material(
+              elevation: 8,
+              borderRadius: BorderRadius.circular(10),
+              shadowColor: Colors.black26,
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
+                decoration: BoxDecoration(
+                  color: Colors.white,
+                  borderRadius: BorderRadius.circular(10),
+                  border: Border.all(color: Colors.grey.shade300),
+                ),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Container(
-                      padding: const EdgeInsets.all(10),
-                      decoration: BoxDecoration(
-                        color: Colors.deepPurple.shade50,
-                        borderRadius: BorderRadius.circular(12),
-                      ),
-                      child: Icon(Icons.person, color: Colors.deepPurple.shade700, size: 28),
-                    ),
-                    const SizedBox(width: 14),
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
+                    if (grantedLeave.isNotEmpty)
+                      Row(
+                        mainAxisSize: MainAxisSize.min,
                         children: [
+                          Icon(Icons.event_available, size: 18, color: Colors.teal.shade700),
+                          const SizedBox(width: 8),
                           Text(
-                            name.isNotEmpty ? name : 'Unknown',
-                            style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+                            'Granted Leave:  ',
+                            style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600, color: Colors.teal.shade700),
                           ),
-                          if (roll.isNotEmpty)
-                            Text(roll, style: TextStyle(fontSize: 14, color: Colors.grey.shade600)),
+                          Text(grantedLeave, style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w500)),
                         ],
                       ),
-                    ),
-                    IconButton(
-                      onPressed: () => Navigator.of(ctx).pop(),
-                      icon: const Icon(Icons.close),
-                      splashRadius: 20,
-                    ),
+                    if (grantedLeave.isNotEmpty && grantedReturn.isNotEmpty)
+                      const SizedBox(height: 8),
+                    if (grantedReturn.isNotEmpty)
+                      Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(
+                            isExtended ? Icons.update : Icons.event_note,
+                            size: 18,
+                            color: isExtended ? Colors.deepOrange : Colors.indigo,
+                          ),
+                          const SizedBox(width: 8),
+                          Text(
+                            isExtended ? 'Granted Return (Ext):  ' : 'Granted Return:  ',
+                            style: TextStyle(
+                              fontSize: 14,
+                              fontWeight: FontWeight.w600,
+                              color: isExtended ? Colors.deepOrange : Colors.indigo,
+                            ),
+                          ),
+                          Text(grantedReturn, style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w500)),
+                        ],
+                      ),
                   ],
                 ),
-
-                const SizedBox(height: 20),
-
-                // Info chips
-                Wrap(
-                  spacing: 8,
-                  runSpacing: 8,
-                  children: [
-                    if (phone.isNotEmpty) _infoChip(Icons.phone, phone),
-                    if (roomNumber.isNotEmpty) _infoChip(Icons.meeting_room, 'Room $roomNumber'),
-                    if (address.isNotEmpty) _infoChip(Icons.location_on, address),
-                    if (duration.isNotEmpty) _infoChip(Icons.timer, duration),
-                  ],
-                ),
-
-                const SizedBox(height: 20),
-                const Divider(),
-                const SizedBox(height: 12),
-
-                // Granted leave/return section (only if data exists)
-                if (grantedLeave.isNotEmpty || grantedReturn.isNotEmpty) ...[
-                  const SizedBox(height: 20),
-                  const Divider(),
-                  const SizedBox(height: 12),
-                  const Text(
-                    'Granted Dates',
-                    style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: Colors.black54),
-                  ),
-                  const SizedBox(height: 8),
-                  if (grantedLeave.isNotEmpty)
-                    _grantedTile(
-                      label: 'Granted Leave',
-                      value: grantedLeave,
-                      icon: Icons.event_available,
-                      color: Colors.teal,
-                    ),
-                  if (grantedReturn.isNotEmpty) ...[
-                    const SizedBox(height: 8),
-                    _grantedTile(
-                      label: 'Granted Return',
-                      value: grantedReturn,
-                      icon: Icons.event_note,
-                      color: Colors.indigo,
-                    ),
-                  ],
-                ],
-              ],
+              ),
             ),
-          ),
-        ),
-      ),
-    );
-  }
-
-  Widget _infoChip(IconData icon, String text) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-      decoration: BoxDecoration(
-        color: Colors.grey.shade100,
-        borderRadius: BorderRadius.circular(20),
-        border: Border.all(color: Colors.grey.shade300),
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Icon(icon, size: 14, color: Colors.grey.shade600),
-          const SizedBox(width: 6),
-          Text(text, style: TextStyle(fontSize: 12, color: Colors.grey.shade700)),
-        ],
-      ),
-    );
-  }
-
-  Widget _timeCard({
-    required String label,
-    required String value,
-    required IconData icon,
-    required Color color,
-  }) {
-    return Container(
-      padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(
-        color: color.withOpacity(0.06),
-        borderRadius: BorderRadius.circular(10),
-        border: Border.all(color: color.withOpacity(0.2)),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              Icon(icon, size: 16, color: color),
-              const SizedBox(width: 6),
-              Text(label, style: TextStyle(fontSize: 12, color: color, fontWeight: FontWeight.w600)),
-            ],
-          ),
-          const SizedBox(height: 6),
-          Text(
-            value,
-            style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: color),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _grantedTile({
-    required String label,
-    required String value,
-    required IconData icon,
-    required Color color,
-  }) {
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-      decoration: BoxDecoration(
-        color: color.withOpacity(0.05),
-        borderRadius: BorderRadius.circular(10),
-        border: Border.all(color: color.withOpacity(0.2)),
-      ),
-      child: Row(
-        children: [
-          Icon(icon, size: 20, color: color),
-          const SizedBox(width: 12),
-          Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(label, style: TextStyle(fontSize: 11, color: color.withOpacity(0.7), fontWeight: FontWeight.w500)),
-              const SizedBox(height: 2),
-              Text(value, style: TextStyle(fontSize: 15, fontWeight: FontWeight.w600, color: color)),
-            ],
           ),
         ],
       ),
@@ -329,183 +211,260 @@ class _LeaveApplicationsScreenState extends State<LeaveApplicationsScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('Leave Applications')),
+      backgroundColor: const Color(0xFFF5F6FA),
+      appBar: AppBar(
+        title: const Text('Leave Applications', style: TextStyle(fontWeight: FontWeight.w600, letterSpacing: 0.3)),
+        elevation: 0,
+        flexibleSpace: Container(
+          decoration: const BoxDecoration(
+            gradient: LinearGradient(
+              colors: [Color(0xFF3949AB), Color(0xFF5C6BC0)],
+              begin: Alignment.topLeft,
+              end: Alignment.bottomRight,
+            ),
+          ),
+        ),
+      ),
       body: Padding(
-        padding: const EdgeInsets.all(16.0),
+        padding: const EdgeInsets.fromLTRB(20, 16, 20, 12),
         child: Column(
           children: [
             // Search bar
-            Padding(
-              padding: const EdgeInsets.only(bottom: 12),
+            Container(
+              margin: const EdgeInsets.only(bottom: 14),
+              decoration: BoxDecoration(
+                color: Colors.white,
+                borderRadius: BorderRadius.circular(14),
+                boxShadow: [
+                  BoxShadow(color: Colors.black.withOpacity(0.06), blurRadius: 10, offset: const Offset(0, 2)),
+                ],
+              ),
               child: TextField(
                 controller: _searchController,
                 decoration: InputDecoration(
                   hintText: 'Search by Roll Number or Name...',
-                  prefixIcon: const Icon(Icons.search),
+                  hintStyle: TextStyle(color: Colors.grey.shade400, fontSize: 14),
+                  prefixIcon: Icon(Icons.search, color: Colors.grey.shade500),
                   suffixIcon: _searchQuery.isNotEmpty
                       ? IconButton(
-                          icon: const Icon(Icons.clear),
+                          icon: Icon(Icons.clear, color: Colors.grey.shade500),
                           onPressed: () {
                             _searchController.clear();
                             setState(() => _searchQuery = '');
                           },
                         )
                       : null,
-                  border: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(12),
-                  ),
-                  filled: true,
-                  fillColor: Colors.grey.shade100,
-                  contentPadding: const EdgeInsets.symmetric(vertical: 12),
+                  border: InputBorder.none,
+                  contentPadding: const EdgeInsets.symmetric(vertical: 14, horizontal: 16),
                 ),
                 onChanged: (v) => setState(() => _searchQuery = v.trim()),
               ),
             ),
             // Table
             Expanded(
-              child: Card(
-                child: Padding(
-                  padding: const EdgeInsets.all(8.0),
-                  child: ValueListenableBuilder<List<Map<String, dynamic>>>(
-                    valueListenable: widget.applicationsListenable,
-                    builder: (context, allApplications, _) {
-                      final leaves = allApplications
-                          .where((a) => _isLeave(a))
-                          .where(_matchesSearch)
-                          .toList();
+              child: Container(
+                decoration: BoxDecoration(
+                  color: Colors.white,
+                  borderRadius: BorderRadius.circular(14),
+                  boxShadow: [
+                    BoxShadow(color: Colors.black.withOpacity(0.06), blurRadius: 12, offset: const Offset(0, 3)),
+                  ],
+                ),
+                child: ClipRRect(
+                  borderRadius: BorderRadius.circular(14),
+                  child: Padding(
+                    padding: const EdgeInsets.all(4.0),
+                    child: ValueListenableBuilder<List<Map<String, dynamic>>>(
+                      valueListenable: widget.applicationsListenable,
+                      builder: (context, allApplications, _) {
+                        final leaves = allApplications
+                            .where((a) => _isLeave(a))
+                            .where(_matchesSearch)
+                            .toList();
 
-                      if (allApplications.where((a) => _isLeave(a)).isEmpty) {
-                        return const Center(
-                          child: Text('No leave applications received yet.'),
-                        );
-                      }
-                      if (leaves.isEmpty) {
-                        return const Center(
-                          child: Text('No matching entries found.'),
-                        );
-                      }
+                        if (allApplications.where((a) => _isLeave(a)).isEmpty) {
+                          return Center(
+                            child: Column(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Icon(Icons.inbox_outlined, size: 56, color: Colors.grey.shade300),
+                                const SizedBox(height: 12),
+                                Text('No leave applications received yet.',
+                                    style: TextStyle(fontSize: 15, color: Colors.grey.shade500)),
+                              ],
+                            ),
+                          );
+                        }
+                        if (leaves.isEmpty) {
+                          return Center(
+                            child: Column(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Icon(Icons.search_off, size: 56, color: Colors.grey.shade300),
+                                const SizedBox(height: 12),
+                                Text('No matching entries found.',
+                                    style: TextStyle(fontSize: 15, color: Colors.grey.shade500)),
+                              ],
+                            ),
+                          );
+                        }
 
-                      return Scrollbar(
-                        controller: _horizontalScrollController,
-                        thumbVisibility: true,
-                        trackVisibility: true,
-                        child: SingleChildScrollView(
+                        return Scrollbar(
                           controller: _horizontalScrollController,
-                          scrollDirection: Axis.horizontal,
-                        child: Builder(
-                          builder: (ctx) {
-                            final screenWidth = MediaQuery.of(ctx).size.width - 48;
-                            final minW = screenWidth;
-                            final colCount = 9; // reduced from 10 (removed Received)
-                            final columnSpacing = math.max(
-                              12.0,
-                              (minW / math.max(1, colCount).toDouble()) * 0.7,
-                            );
-                            return ConstrainedBox(
-                              constraints: BoxConstraints(minWidth: minW),
-                              child: SingleChildScrollView(
-                                child: DataTable(
-                                  columnSpacing: columnSpacing,
-                                  headingRowHeight: 64,
-                                  dataRowHeight: 64,
-                                  columns: const [
-                                    DataColumn(label: Text('Name', style: TextStyle(fontWeight: FontWeight.bold))),
-                                    DataColumn(label: Text('Roll Number', style: TextStyle(fontWeight: FontWeight.bold))),
-                                    DataColumn(label: Text('Phone Number', style: TextStyle(fontWeight: FontWeight.bold))),
-                                    DataColumn(label: Text('Room Number', style: TextStyle(fontWeight: FontWeight.bold))),
-                                    DataColumn(label: Text('Leaving', style: TextStyle(fontWeight: FontWeight.bold))),
-                                    DataColumn(label: Text('Returning', style: TextStyle(fontWeight: FontWeight.bold))),
-                                    DataColumn(label: Text('Duration', style: TextStyle(fontWeight: FontWeight.bold))),
-                                    DataColumn(label: Text('Address', style: TextStyle(fontWeight: FontWeight.bold))),
-                                    DataColumn(label: Text('Security', style: TextStyle(fontWeight: FontWeight.bold))),
-                                  ],
-                                  rows: leaves.map((a) {
-                                    final name = _cell(a, ['name', 'Name', 'full name', 'fullname']);
-                                    final roll = _cell(a, ['roll number', 'Roll Number', 'roll', 'id', 'Id', 'rollno']);
-                                    final phone = _cell(a, ['phone number', 'Phone Number', 'phone', 'mobile']);
-                                    final roomNumber = _cell(a, ['roomNumber', 'room_number', 'RoomNumber']);
-                                    final leaving = _cell(a, ['leaving', 'Leaving', 'from']);
-                                    final returning = _cell(a, ['returning', 'Returning', 'to']);
-                                    final duration = _cell(a, ['duration', 'Duration']);
-                                    final address = _cell(a, ['address', 'Address', 'addressDuringLeave', 'location', 'Location']);
-                                    final security = _cell(a, ['security', 'Security']);
+                          thumbVisibility: true,
+                          trackVisibility: true,
+                          child: SingleChildScrollView(
+                            controller: _horizontalScrollController,
+                            scrollDirection: Axis.horizontal,
+                          child: Builder(
+                            builder: (ctx) {
+                              final screenWidth = MediaQuery.of(ctx).size.width - 48;
+                              final minW = screenWidth;
+                              final colCount = 9;
+                              final columnSpacing = math.max(
+                                12.0,
+                                (minW / math.max(1, colCount).toDouble()) * 0.7,
+                              );
 
-                                    Widget leavingWidget() {
-                                      if (leaving.isEmpty) {
-                                        return const Text('\u2014', style: TextStyle(color: Colors.black45));
+                              const headerStyle = TextStyle(
+                                fontWeight: FontWeight.w700,
+                                fontSize: 13,
+                                color: Color(0xFF1A237E),
+                                letterSpacing: 0.3,
+                              );
+
+                              return ConstrainedBox(
+                                constraints: BoxConstraints(minWidth: minW),
+                                child: SingleChildScrollView(
+                                  child: DataTable(
+                                    columnSpacing: columnSpacing,
+                                    headingRowHeight: 52,
+                                    dataRowHeight: 58,
+                                    headingRowColor: WidgetStateProperty.all(const Color(0xFFE8EAF6)),
+                                    dividerThickness: 0.5,
+                                    columns: const [
+                                      DataColumn(label: Text('Name', style: headerStyle)),
+                                      DataColumn(label: Text('Roll Number', style: headerStyle)),
+                                      DataColumn(label: Text('Phone', style: headerStyle)),
+                                      DataColumn(label: Text('Room', style: headerStyle)),
+                                      DataColumn(label: Text('Leaving', style: headerStyle)),
+                                      DataColumn(label: Text('Returning', style: headerStyle)),
+                                      DataColumn(label: Text('Duration', style: headerStyle)),
+                                      DataColumn(label: Text('Address', style: headerStyle)),
+                                      DataColumn(label: Text('Security', style: headerStyle)),
+                                    ],
+                                    rows: leaves.asMap().entries.map((entry) {
+                                      final idx = entry.key;
+                                      final a = entry.value;
+                                      final name = _cell(a, ['name', 'Name', 'full name', 'fullname']);
+                                      final roll = _cell(a, ['roll number', 'Roll Number', 'roll', 'id', 'Id', 'rollno']);
+                                      final phone = _cell(a, ['phone number', 'Phone Number', 'phone', 'mobile']);
+                                      final roomNumber = _cell(a, ['roomNumber', 'room_number', 'RoomNumber']);
+                                      final leaving = _cell(a, ['leaving', 'Leaving', 'from']);
+                                      final returning = _cell(a, ['returning', 'Returning', 'to']);
+                                      final duration = _cell(a, ['duration', 'Duration']);
+                                      final address = _cell(a, ['address', 'Address', 'addressDuringLeave', 'location', 'Location']);
+                                      final security = _cell(a, ['security', 'Security']);
+
+                                      Widget leavingWidget() {
+                                        if (leaving.isEmpty) {
+                                          return const Text('\u2014', style: TextStyle(color: Colors.black38));
+                                        }
+                                        return Text(
+                                          leaving,
+                                          style: const TextStyle(color: Color(0xFF2E7D32), fontWeight: FontWeight.w600, fontSize: 13),
+                                        );
                                       }
-                                      return SelectableText(
-                                        leaving,
-                                        style: const TextStyle(color: Color(0xFF2E7D32), fontWeight: FontWeight.w600, fontSize: 14),
-                                      );
-                                    }
 
-                                    Widget returningWidget() {
-                                      if (returning.isEmpty) {
-                                        return const Text('\u2014', style: TextStyle(color: Colors.black45));
+                                      Widget returningWidget() {
+                                        if (returning.isEmpty) {
+                                          return const Text('\u2014', style: TextStyle(color: Colors.black38));
+                                        }
+                                        return Text(
+                                          returning,
+                                          style: const TextStyle(color: Color(0xFFD32F2F), fontWeight: FontWeight.w600, fontSize: 13),
+                                        );
                                       }
-                                      return Text(
-                                        returning,
-                                        style: const TextStyle(color: Color(0xFFD32F2F), fontWeight: FontWeight.w600, fontSize: 14),
+
+                                      String daysOnly(String d) {
+                                        if (d.isEmpty) return '';
+                                        final match = RegExp(r'(\d+)\s*d').firstMatch(d);
+                                        if (match != null) return '${match.group(1)} days';
+                                        if (d.contains('day')) return d;
+                                        return d;
+                                      }
+                                      final durationDays = daysOnly(duration);
+
+                                      Widget durationWidget() {
+                                        if (durationDays.isEmpty) return const SizedBox.shrink();
+                                        return Container(
+                                          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                                          decoration: BoxDecoration(
+                                            color: Colors.amber.shade700,
+                                            borderRadius: BorderRadius.circular(16),
+                                          ),
+                                          child: Text(durationDays, style: const TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.w600)),
+                                        );
+                                      }
+
+                                      Color securityColor() {
+                                        final s = security.toLowerCase();
+                                        if (s.contains('checked')) return Colors.green.shade600;
+                                        if (s.contains('late')) return Colors.amber.shade700;
+                                        if (s.contains('unverified') || s.contains('un')) return Colors.red.shade400;
+                                        return Colors.blueGrey.shade400;
+                                      }
+
+                                      final highlight = _shouldHighlightRow(a);
+                                      final cellStyle = TextStyle(
+                                        fontSize: 13,
+                                        fontWeight: highlight ? FontWeight.bold : FontWeight.normal,
+                                        color: Colors.black87,
                                       );
-                                    }
 
-                                    Widget durationWidget() {
-                                      if (duration.isEmpty) return const SizedBox.shrink();
-                                      return Chip(
-                                        label: Text(duration, style: const TextStyle(color: Colors.white, fontSize: 13)),
-                                        backgroundColor: Colors.amber.shade700,
+                                      Color rowColor;
+                                      if (highlight) {
+                                        rowColor = const Color(0xFFFFCDD2);
+                                      } else {
+                                        rowColor = idx.isEven ? Colors.white : const Color(0xFFF8F9FD);
+                                      }
+
+                                      return DataRow(
+                                        color: WidgetStateProperty.all(rowColor),
+                                        cells: [
+                                          DataCell(Text(name, style: cellStyle), onTap: () => _showRowDetail(context, a)),
+                                          DataCell(Text(roll, style: cellStyle), onTap: () => _showRowDetail(context, a)),
+                                          DataCell(Text(phone, style: cellStyle), onTap: () => _showRowDetail(context, a)),
+                                          DataCell(Text(roomNumber, style: cellStyle), onTap: () => _showRowDetail(context, a)),
+                                          DataCell(leavingWidget(), onTap: () => _showRowDetail(context, a)),
+                                          DataCell(returningWidget(), onTap: () => _showRowDetail(context, a)),
+                                          DataCell(durationWidget(), onTap: () => _showRowDetail(context, a)),
+                                          DataCell(Text(address, style: cellStyle, overflow: TextOverflow.ellipsis), onTap: () => _showRowDetail(context, a)),
+                                          DataCell(
+                                            security.isEmpty
+                                                ? const SizedBox.shrink()
+                                                : Container(
+                                                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                                                    decoration: BoxDecoration(
+                                                      color: securityColor(),
+                                                      borderRadius: BorderRadius.circular(16),
+                                                    ),
+                                                    child: Text(security, style: const TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.w600)),
+                                                  ),
+                                            onTap: () => _showRowDetail(context, a),
+                                          ),
+                                        ],
                                       );
-                                    }
-
-                                    String securityLabel() {
-                                      return security.isNotEmpty ? security : '';
-                                    }
-
-                                    Color securityColor() {
-                                      final s = security.toLowerCase();
-                                      if (s.contains('checked')) return Colors.green.shade600;
-                                      if (s.contains('late')) return Colors.amber.shade700;
-                                      if (s.contains('unverified') || s.contains('un')) return Colors.red.shade400;
-                                      return Colors.grey.shade400;
-                                    }
-
-                                    final secLabel = securityLabel();
-                                    const cellStyle = TextStyle(fontSize: 14);
-                                    final highlight = _shouldHighlightRow(a);
-                                    return DataRow(
-                                      color: highlight
-                                          ? WidgetStateProperty.all(Colors.red.shade50)
-                                          : null,
-                                      cells: [
-                                        DataCell(SelectableText(name, style: cellStyle), onTap: () => _showRowDetail(context, a)),
-                                        DataCell(SelectableText(roll, style: cellStyle), onTap: () => _showRowDetail(context, a)),
-                                        DataCell(SelectableText(phone, style: cellStyle), onTap: () => _showRowDetail(context, a)),
-                                        DataCell(SelectableText(roomNumber, style: cellStyle), onTap: () => _showRowDetail(context, a)),
-                                        DataCell(leavingWidget(), onTap: () => _showRowDetail(context, a)),
-                                        DataCell(returningWidget(), onTap: () => _showRowDetail(context, a)),
-                                        DataCell(durationWidget(), onTap: () => _showRowDetail(context, a)),
-                                        DataCell(SelectableText(address, style: cellStyle), onTap: () => _showRowDetail(context, a)),
-                                        DataCell(
-                                          secLabel.isEmpty
-                                              ? const SizedBox.shrink()
-                                              : Chip(
-                                                  label: Text(secLabel, style: const TextStyle(color: Colors.white, fontSize: 13)),
-                                                  backgroundColor: securityColor(),
-                                                ),
-                                          onTap: () => _showRowDetail(context, a),
-                                        ),
-                                      ],
-                                    );
-                                  }).toList(),
+                                    }).toList(),
+                                  ),
                                 ),
-                              ),
-                            );
-                          },
-                        ),
-                        ),
-                      );
-                    },
+                              );
+                            },
+                          ),
+                          ),
+                        );
+                      },
+                    ),
                   ),
                 ),
               ),

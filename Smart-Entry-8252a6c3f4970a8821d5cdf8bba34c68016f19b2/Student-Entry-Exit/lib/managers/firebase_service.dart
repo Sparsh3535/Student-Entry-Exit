@@ -366,8 +366,21 @@ class FirebaseService {
         : leavingDate;
 
     // Return date and time
-    final String returnDate = _formatTimestampToDate(data['returnDate']);
+    String returnDate = _formatTimestampToDate(data['returnDate']);
     final String returnTime = data['returnTime']?.toString() ?? '';
+
+    // Extension handling: if extended=true, use extensionNewReturnDate
+    final bool isExtended = data['extended'] == true ||
+        data['extended']?.toString().toLowerCase() == 'true';
+    final String extensionStatus = data['extensionStatus']?.toString().toLowerCase() ?? '';
+
+    if (isExtended && extensionStatus == 'approved') {
+      final String extReturnDate = _formatTimestampToDate(data['extensionNewReturnDate']);
+      if (extReturnDate.isNotEmpty) {
+        print('[LEAVE NORMALIZE] Extension approved — using extensionNewReturnDate: $extReturnDate (was: $returnDate)');
+        returnDate = extReturnDate;
+      }
+    }
 
     return {
       'type': 'leave',
@@ -391,6 +404,7 @@ class FirebaseService {
       'leavingTime': leavingTime,
       'returnDate': returnDate,
       'returnTime': returnTime,
+      'extended': isExtended && extensionStatus == 'approved',
       'security': null,
     };
   }

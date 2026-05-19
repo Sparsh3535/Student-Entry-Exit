@@ -145,11 +145,8 @@ class LeaveApplicationsManager {
         debugPrint('[LEAVE MANAGER] WARNING: incoming fields has no _docId!');
       }
 
-      // Update leaving from incoming data if it has a newer/more complete value
-      final incomingLeaving = fields['leaving']?.toString() ?? '';
-      if (incomingLeaving.isNotEmpty) {
-        r['leaving'] = incomingLeaving;
-      }
+      // leaving is set once on the first scan and never overwritten
+      // (the original scan time must be preserved even after extensions)
 
       // Update returnDate from incoming data (planned return date from Firebase form)
       final incomingReturnDate = fields['returnDate']?.toString() ?? '';
@@ -295,11 +292,21 @@ class LeaveApplicationsManager {
     }
 
     // Export ALL old entries (filled + unfilled) to CSV
+    // Group by RETURNING date (for completed entries) or receivedAt (for incomplete)
     if (toExport.isNotEmpty) {
       final byDate = <String, List<Map<String, dynamic>>>{};
       for (final row in toExport) {
+        final returning = (row['returning']?.toString() ?? '').trim();
         final receivedAt = row['receivedAt']?.toString() ?? '';
-        final dateStr = receivedAt.length >= 10 ? receivedAt.substring(0, 10) : 'unknown';
+        // Use returning date for completed entries, receivedAt for incomplete
+        String dateStr;
+        if (returning.isNotEmpty && returning.length >= 10) {
+          dateStr = returning.substring(0, 10);
+        } else if (receivedAt.length >= 10) {
+          dateStr = receivedAt.substring(0, 10);
+        } else {
+          dateStr = 'unknown';
+        }
         byDate.putIfAbsent(dateStr, () => []).add(row);
       }
       for (final entry in byDate.entries) {

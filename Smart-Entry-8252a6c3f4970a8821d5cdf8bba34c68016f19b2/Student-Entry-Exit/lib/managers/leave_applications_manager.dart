@@ -129,13 +129,17 @@ class LeaveApplicationsManager {
       _lastScanTime[scanKey] = DateTime.now();
     }
 
+    // Resolve the timestamp to record:
+    // • If this scan was queued offline, _scanTime holds the original scan time.
+    // • Otherwise use the current time (live scan).
+    final String now = _resolveScanTime(fields);
+
     final existingIndex = findExistingRowIndex(_leaveApps, id, phone, name);
     _log('[LEAVE MANAGER] Found existing row at index: $existingIndex');
 
     if (existingIndex >= 0) {
       final r = _leaveApps[existingIndex];
       final prevReturning = (r['returning'] as String?) ?? '';
-      final now = shortDateTime(DateTime.now());
 
       // Update _docId from incoming data (may be missing in cached rows)
       if (fields['_docId'] != null) {
@@ -155,7 +159,7 @@ class LeaveApplicationsManager {
       }
 
       if (prevReturning.trim().isEmpty) {
-        // returning empty → fill it
+        // returning empty → fill it with the actual scan time
         r['returning'] = now;
         // Update address from incoming data (fresh from Firebase)
         final addr = fields['address'];
@@ -201,12 +205,12 @@ class LeaveApplicationsManager {
       return;
     }
 
-    // not found → add with leaving set to CURRENT TIME, returning empty
+    // not found → add with leaving set to ACTUAL SCAN TIME (not now, which may be delayed)
     final normalized = Map<String, dynamic>.from(fields);
-    normalized['leaving'] = shortDateTime(DateTime.now()); // scan time, not DB value
+    normalized['leaving'] = now; // scan time (queued or live)
     normalized['returning'] = null;
     normalized['duration'] = ''; // will be calculated when returning is filled
-    normalized['receivedAt'] = shortDateTime(DateTime.now());
+    normalized['receivedAt'] = now;
     normalized['security'] = SecurityNameService().name;
     _log('[LEAVE MANAGER] Creating new row: $normalized');
     _leaveApps.add(normalized);
@@ -215,6 +219,19 @@ class LeaveApplicationsManager {
     notifier.value = List<Map<String, dynamic>>.from(_leaveApps);
     _save();
     _log('[LEAVE MANAGER] ✓ Notifier updated with ${notifier.value.length} rows');
+  }
+
+  /// Returns the timestamp to record for this scan:
+  /// - If fields contains '_scanTime' (queued offline scan), use that —
+  ///   it is the time the student ACTUALLY scanned, not when internet returned.
+  /// - Otherwise use the current time (live scan).
+  String _resolveScanTime(Map<String, dynamic> fields) {
+    final queued = fields['_scanTime']?.toString() ?? '';
+    if (queued.isNotEmpty) {
+      _log('[LEAVE MANAGER] ⏱ Using queued scan time: $queued');
+      return queued;
+    }
+    return shortDateTime(DateTime.now());
   }
 
   /// Helper method for logging

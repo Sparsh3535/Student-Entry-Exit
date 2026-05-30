@@ -90,6 +90,9 @@ class LocalStorageService {
             case 'leave':
               columns = CsvService.leaveColumns;
               break;
+            case 'vehicle':
+              columns = CsvService.vehicleColumns;
+              break;
             default:
               // Fallback: use all keys from first row
               columns = rows.first.keys

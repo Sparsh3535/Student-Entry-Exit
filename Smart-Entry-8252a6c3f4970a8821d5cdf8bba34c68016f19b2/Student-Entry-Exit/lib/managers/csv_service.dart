@@ -87,7 +87,7 @@ class CsvService {
   Future<void> _ensureSubfolders() async {
     if (_basePath == null) return;
     final base = '$_basePath${Platform.pathSeparator}attendance_records';
-    final folders = ['day_scholar', 'hostel', 'leave_application'];
+    final folders = ['day_scholar', 'hostel', 'leave_application', 'vehicle'];
     for (final folder in folders) {
       final dir = Directory('$base${Platform.pathSeparator}$folder');
       if (!await dir.exists()) {
@@ -103,6 +103,7 @@ class CsvService {
       case 'day_scholar': return 'day_scholar';
       case 'hostel': return 'hostel';
       case 'leave': return 'leave_application';
+      case 'vehicle': return 'vehicle';
       default: return managerName;
     }
   }
@@ -240,5 +241,20 @@ class CsvService {
     {'key': 'address', 'header': 'Address'},
     {'key': 'receivedAt', 'header': 'Received'},
     {'key': 'security', 'header': 'Security'},
+  ];
+
+  /// Column definitions for Vehicle Registration
+  static final vehicleColumns = [
+    {'key': 'rollNumber',   'header': 'Roll Number'},
+    {'key': 'name',         'header': 'Name'},
+    {'key': 'phone',        'header': 'Phone'},
+    {'key': 'vehicleNumber','header': 'Vehicle Number'},
+    {'key': 'vehicleType',  'header': 'Vehicle Type'},
+    {'key': 'visitDate',    'header': 'Visit Date'},
+    {'key': 'visitorName',  'header': 'Visitor Name'},
+    {'key': 'visitorPhone', 'header': 'Visitor Phone'},
+    {'key': 'status',       'header': 'Status'},
+    {'key': 'inTime',       'header': 'In Time'},
+    {'key': 'outTime',      'header': 'Out Time'},
   ];
 }

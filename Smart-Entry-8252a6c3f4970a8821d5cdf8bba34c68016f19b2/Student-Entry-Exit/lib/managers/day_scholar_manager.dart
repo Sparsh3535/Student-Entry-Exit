@@ -49,6 +49,11 @@ class DayScholarManager {
       _lastScanTime[scanKey] = DateTime.now();
     }
 
+    // Resolve the timestamp to record:
+    // • If this scan was queued offline, _scanTime holds the original scan time.
+    // • Otherwise use the current time (live scan).
+    final String now = _resolveScanTime(fields);
+
     final existingIndex = findExistingRowIndex(_dayRows, id, phone, name);
     _log('[DAY SCHOLAR MANAGER] Found existing row at index: $existingIndex');
 
@@ -56,7 +61,6 @@ class DayScholarManager {
       final r = _dayRows[existingIndex];
       final prevIn = (r['intime'] as String?) ?? '';
       final prevOut = (r['outtime'] as String?) ?? '';
-      final now = shortDateTime(DateTime.now());
 
       // Check if this scan is from a DIFFERENT gate pass (different _docId)
       final existingDocId = r['_docId']?.toString() ?? '';
@@ -136,7 +140,7 @@ class DayScholarManager {
 
     // not found -> add with intime set (preserve all incoming fields)
     final normalized = Map<String, dynamic>.from(fields);
-    normalized['intime'] = shortDateTime(DateTime.now());
+    normalized['intime'] = _resolveScanTime(fields);
     normalized['outtime'] = null;
     normalized['security'] = SecurityNameService().name;
     _log('[DAY SCHOLAR MANAGER] Creating new row: $normalized');
@@ -154,6 +158,19 @@ class DayScholarManager {
       '[DAY SCHOLAR MANAGER] ✓ Notifier updated with ${notifier.value.length} rows',
     );
     _log('[DAY SCHOLAR MANAGER] Notifier value: ${notifier.value}');
+  }
+
+  /// Returns the timestamp to record for this scan:
+  /// - If fields contains '_scanTime' (queued offline scan), use that —
+  ///   it is the time the student ACTUALLY scanned, not when internet returned.
+  /// - Otherwise use the current time (live scan).
+  String _resolveScanTime(Map<String, dynamic> fields) {
+    final queued = fields['_scanTime']?.toString() ?? '';
+    if (queued.isNotEmpty) {
+      _log('[DAY SCHOLAR MANAGER] ⏱ Using queued scan time: $queued');
+      return queued;
+    }
+    return shortDateTime(DateTime.now());
   }
 
   /// Helper method for logging

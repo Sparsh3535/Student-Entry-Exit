@@ -7,14 +7,17 @@ import 'package:file_picker/file_picker.dart';
 import '../managers/day_scholar_manager.dart';
 import '../managers/hostel_manager.dart';
 import '../managers/leave_applications_manager.dart';
+import '../managers/vehicle_manager.dart';
 import '../managers/qr_authenticator.dart';
 import '../managers/firebase_service.dart';
 import '../managers/csv_service.dart';
 import '../managers/local_storage_service.dart';
 import '../managers/security_name_service.dart';
+import '../managers/scan_queue_service.dart';
 import 'day_scholar.dart';
 import 'leave_applications.dart';
 import 'hostel.dart';
+import 'vehicle_screen.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -29,8 +32,13 @@ class _HomeScreenState extends State<HomeScreen> {
   late final HostelManager _hostelManager = HostelManager();
   late final LeaveApplicationsManager _leaveManager =
       LeaveApplicationsManager();
+  late final VehicleManager _vehicleManager = VehicleManager();
   late final QRAuthenticator _qrAuthenticator;
   final FirebaseService _firebaseService = FirebaseService();
+
+  // Offline scan queue — holds docIds that failed due to no internet
+  final ScanQueueService _scanQueueService = ScanQueueService();
+  bool _isDrainingQueue = false; // prevents concurrent drain runs
 
   // QR scanner keyboard input (scanner types text + presses Enter)
   final FocusNode _scannerFocusNode = FocusNode();
@@ -73,13 +81,17 @@ class _HomeScreenState extends State<HomeScreen> {
       );
       _firebaseService.deleteByDocumentId(docId);
     };
-    // Initialize QR authenticator
+    // Initialize QR authenticator (Vehicle is polling-based — not QR-scan routed)
     _qrAuthenticator = QRAuthenticator(
       dayScholarManager: _dayScholarManager,
       hostelManager: _hostelManager,
       leaveManager: _leaveManager,
     );
     _qrAuthenticator.logCallback = _log;
+    // Wire vehicle manager log callback
+    _vehicleManager.logCallback = _log;
+    // Wire scan queue log callback
+    _scanQueueService.logCallback = _log;
     // Load persisted data from local storage (auto-clears if from previous day)
     // But first ensure CSV path is configured so exports work
     _startupSequence();
@@ -152,11 +164,35 @@ class _HomeScreenState extends State<HomeScreen> {
     // Step 3: Now load saved data (CSV path is available for export)
     await _loadSavedData();
 
-    // Step 4: Start midnight auto-reset timer
+    // Step 4: Load any offline scan queue that survived from a previous session
+    await _scanQueueService.loadFromDisk();
+
+    // Step 4b: Startup drain — handles the edge case where the laptop was shut
+    // down while scans were queued, then reopened with internet already available.
+    //
+    // The normal drain trigger fires on wasOffline→online TRANSITION only.
+    // If internet is already ON when the app starts, that transition never
+    // happens and the queue would sit forever. This scheduled drain handles it.
+    //
+    // We delay 5 seconds to give Firebase time to fully initialize before
+    // attempting Firestore fetches.
+    if (_scanQueueService.isNotEmpty) {
+      _log('[QUEUE] ⚡ Found ${_scanQueueService.length} queued scan(s) from a previous session');
+      _log('[QUEUE] ⏳ Scheduling startup drain in 5 seconds (waiting for Firebase to settle)...');
+      Future.delayed(const Duration(seconds: 5), () {
+        if (mounted && _scanQueueService.isNotEmpty && !_isDrainingQueue) {
+          _log('[QUEUE] 🔄 Startup drain triggered — processing scans from previous session');
+          _drainScanQueue();
+        }
+      });
+    }
+
+    // Step 5: Start midnight auto-reset timer
     _startMidnightTimer();
 
-    // Step 5: Start internet connectivity monitoring
+    // Step 6: Start internet connectivity monitoring
     _startConnectivityCheck();
+    // Note: Vehicle data is fetched on-demand (manual refresh button).
   }
 
   @override
@@ -198,12 +234,66 @@ class _HomeScreenState extends State<HomeScreen> {
             });
           }
         });
+
+        // If we just came back online, drain any queued offline scans
+        if (wasOffline && online && _scanQueueService.isNotEmpty) {
+          _drainScanQueue();
+        }
       }
     } catch (e) {
       if (mounted) {
         setState(() => _isOnline = false);
       }
     }
+  }
+
+  /// Drain the offline scan queue in FIFO order.
+  /// Each queued docId is retried as a fresh Firebase fetch.
+  /// If a fetch fails (still no internet), the entry is re-queued at the
+  /// front and draining stops — it will be retried on the next
+  /// connectivity check (every 15 seconds).
+  Future<void> _drainScanQueue() async {
+    if (_isDrainingQueue) return; // prevent concurrent runs
+    _isDrainingQueue = true;
+
+    final total = _scanQueueService.length;
+    _log('[QUEUE] 🌐 Internet restored — draining $total queued scan(s)...');
+
+    int processed = 0;
+    while (_scanQueueService.isNotEmpty) {
+      // Check connectivity before each retry
+      try {
+        final result = await InternetAddress.lookup('google.com')
+            .timeout(const Duration(seconds: 5));
+        final stillOnline = result.isNotEmpty && result[0].rawAddress.isNotEmpty;
+        if (!stillOnline) {
+          _log('[QUEUE] ⚠ Lost internet mid-drain — stopping. ${_scanQueueService.length} scan(s) remain queued.');
+          break;
+        }
+      } catch (_) {
+        _log('[QUEUE] ⚠ Lost internet mid-drain — stopping. ${_scanQueueService.length} scan(s) remain queued.');
+        break;
+      }
+
+      final entry = await _scanQueueService.dequeue();
+      if (entry == null) break;
+
+      processed++;
+      _log('[QUEUE] ↩ Processing queued scan $processed/$total: ${entry.docId} (was queued at: ${entry.enqueuedAt})');
+
+      // Fetch from Firebase — this goes through the normal processing pipeline.
+      // Pass enqueuedAt as scanTime so the recorded timestamp = actual scan time,
+      // NOT the current time (which would be wrong — delayed by offline period).
+      await _fetchAndProcessFromFirebase(entry.docId, scanTime: entry.enqueuedAt);
+    }
+
+    if (_scanQueueService.isEmpty) {
+      _log('[QUEUE] ✅ Queue fully drained — all $processed scan(s) processed successfully');
+    } else {
+      _log('[QUEUE] ℹ Queue drain stopped — ${_scanQueueService.length} scan(s) still pending (will retry when internet is stable)');
+    }
+
+    _isDrainingQueue = false;
   }
 
   /// Start a periodic timer that checks every 30 seconds.
@@ -250,10 +340,11 @@ class _HomeScreenState extends State<HomeScreen> {
         // Clear screen data
         _dayScholarManager.clear();
         _hostelManager.clear();
+        _vehicleManager.clear();
         // Leave: only clear completed entries — incomplete ones survive midnight
         _leaveManager.clearCompleted();
 
-        _log('[MIDNIGHT RESET] ✓ Day scholar & hostel cleared, leave completed entries cleared for new day ($today)');
+        _log('[MIDNIGHT RESET] ✓ Day scholar, hostel & vehicle cleared, leave completed entries cleared for new day ($today)');
       }
     });
   }
@@ -304,6 +395,18 @@ class _HomeScreenState extends State<HomeScreen> {
       _log('[CSV EXPORT] Leave (${_leaveManager.rows.length} rows): ${path ?? "FAILED"}');
     }
 
+    // Vehicle
+    if (_vehicleManager.rows.isNotEmpty) {
+      final path = await csvService.exportToCsv(
+        managerName: 'vehicle',
+        date: date,
+        rows: List<Map<String, dynamic>>.from(_vehicleManager.rows),
+        columns: CsvService.vehicleColumns,
+      );
+      if (path == null) allSucceeded = false;
+      _log('[CSV EXPORT] Vehicle (${_vehicleManager.rows.length} rows): ${path ?? "FAILED"}');
+    }
+
     return allSucceeded;
   }
 
@@ -330,8 +433,9 @@ class _HomeScreenState extends State<HomeScreen> {
     await _dayScholarManager.loadFromStorage();
     await _hostelManager.loadFromStorage();
     await _leaveManager.loadFromStorage();
+    await _vehicleManager.loadFromStorage();
     _log(
-      '[STARTUP] ✓ Local storage loaded (day_scholar: ${_dayScholarManager.rows.length}, hostel: ${_hostelManager.rows.length}, leave: ${_leaveManager.rows.length})',
+      '[STARTUP] ✓ Local storage loaded (day_scholar: ${_dayScholarManager.rows.length}, hostel: ${_hostelManager.rows.length}, leave: ${_leaveManager.rows.length}, vehicle: ${_vehicleManager.rows.length})',
     );
   }
 
@@ -589,13 +693,41 @@ class _HomeScreenState extends State<HomeScreen> {
     _qrAuthenticator.processLine(line);
   }
 
-  /// Fetch student data from Firebase by document ID and process it
-  Future<void> _fetchAndProcessFromFirebase(String docId) async {
+  /// Returns true if the given exception looks like a network/connectivity error.
+  bool _isNetworkError(dynamic e) {
+    final msg = e.toString().toLowerCase();
+    return e is SocketException ||
+        msg.contains('socketexception') ||
+        msg.contains('network') ||
+        msg.contains('connection') ||
+        msg.contains('unreachable') ||
+        msg.contains('failed host lookup') ||
+        msg.contains('timeoutexception') ||
+        msg.contains('timed out') ||
+        (msg.contains('firebase') && msg.contains('unavailable'));
+  }
+
+  /// Fetch student data from Firebase by document ID and process it.
+  /// If the fetch fails due to a network error AND we are not currently
+  /// draining the queue, the docId is enqueued for retry when internet returns.
+  ///
+  /// [scanTime] — optional. When processing a queued scan, this is the
+  /// timestamp from when the student ACTUALLY scanned (enqueuedAt), not now.
+  /// If null, the current time is used (normal live scan behaviour).
+  Future<void> _fetchAndProcessFromFirebase(String docId, {String? scanTime}) async {
     try {
       final totalSw = Stopwatch()..start();
       _log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
       _log('[SCANNER] KEY RECEIVED: $docId');
       _log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+
+      // If we know we are offline, skip the Firebase call and queue immediately
+      if (!_isOnline) {
+        _log('[SCANNER] ⚠ No internet — queuing scan for later retry');
+        await _scanQueueService.enqueue(docId);
+        _log('[QUEUE] 📄 Queue file: ${ScanQueueService().toString()}');
+        return;
+      }
 
       _log('[FIREBASE] Fetching document from database...');
       final fetchSw = Stopwatch()..start();
@@ -609,6 +741,14 @@ class _HomeScreenState extends State<HomeScreen> {
 
         // Pass the fetched data directly to QRAuthenticator as a Map
         studentData['_docId'] = docId;
+
+        // If this is a queued (offline) scan, stamp the ACTUAL scan time
+        // so the manager records when the student scanned, not when internet returned.
+        if (scanTime != null && scanTime.isNotEmpty) {
+          studentData['_scanTime'] = scanTime;
+          _log('[QUEUE] ⏱ Using queued scan time: $scanTime (instead of now)');
+        }
+
         final routeSw = Stopwatch()..start();
         _qrAuthenticator.processMap(studentData);
         routeSw.stop();
@@ -626,9 +766,23 @@ class _HomeScreenState extends State<HomeScreen> {
         _log('  - Firebase connection is working');
       }
     } catch (e) {
-      _log('');
-      _log('✗✗✗ ERROR DURING FIREBASE LOOKUP ✗✗✗');
-      _log('✗ Firebase lookup failed for docId "$docId": $e');
+      // ── Network error: queue the scan so it is retried when online ──
+      if (_isNetworkError(e)) {
+        _log('');
+        _log('✗ NETWORK ERROR — queuing scan for retry when internet returns');
+        _log('✗ Error: $e');
+        // Only enqueue from a LIVE scan (not during a queue drain — if we're
+        // draining and still failing, the drain loop handles re-queuing)
+        if (!_isDrainingQueue) {
+          await _scanQueueService.enqueue(docId);
+        }
+        // Update connectivity state so the banner shows
+        if (mounted) setState(() => _isOnline = false);
+      } else {
+        _log('');
+        _log('✗✗✗ ERROR DURING FIREBASE LOOKUP ✗✗✗');
+        _log('✗ Firebase lookup failed for docId "$docId": $e');
+      }
     }
   }
 
@@ -906,100 +1060,37 @@ class _HomeScreenState extends State<HomeScreen> {
           return SingleChildScrollView(
             child: Column(
               children: [
-                // First row: Day Scholar + Leave Applications
+                // ── Row 1: Day Scholar | Hosteler ────────────────────
                 Row(
                   children: [
-                    // Day Scholar Block
+                    // Day Scholar
                     Expanded(
-                      child: InkWell(
-                        onTap: () {
-                          Navigator.of(context).push(
-                            MaterialPageRoute(
-                              builder: (_) => DayScholarScreen(
-                                applicationsListenable:
-                                    _dayScholarManager.notifier,
-                              ),
-                            ),
-                          );
-                        },
-                        child: Card(
-                          elevation: 4,
-                          child: Container(
-                            height: 200,
-                            padding: const EdgeInsets.all(16),
-                            child: Column(
-                              mainAxisAlignment: MainAxisAlignment.center,
-                              children: [
-                                const Icon(
-                                  Icons.person_outline,
-                                  size: 48,
-                                  color: Colors.blue,
-                                ),
-                                const SizedBox(height: 16),
-                                const Text(
-                                  'Day Scholar',
-                                  style: TextStyle(
-                                    fontSize: 20,
-                                    fontWeight: FontWeight.bold,
-                                  ),
-                                ),
-                                const SizedBox(height: 8),
-                                Text(
-                                  '${_dayScholarManager.rows.length} Entries',
-                                  style: const TextStyle(
-                                    fontSize: 16,
-                                    color: Colors.grey,
-                                  ),
-                                ),
-                              ],
+                      child: _DashboardCard(
+                        icon: Icons.person_outline,
+                        iconColor: Colors.blue,
+                        label: 'Day Scholar',
+                        count: '${_dayScholarManager.rows.length} Entries',
+                        onTap: () => Navigator.of(context).push(
+                          MaterialPageRoute(
+                            builder: (_) => DayScholarScreen(
+                              applicationsListenable: _dayScholarManager.notifier,
                             ),
                           ),
                         ),
                       ),
                     ),
                     const SizedBox(width: 16),
-                    // Leave Applications Block
+                    // Hosteler
                     Expanded(
-                      child: InkWell(
-                        onTap: () {
-                          Navigator.of(context).push(
-                            MaterialPageRoute(
-                              builder: (_) => LeaveApplicationsScreen(
-                                applicationsListenable: _leaveManager.notifier,
-                              ),
-                            ),
-                          );
-                        },
-                        child: Card(
-                          elevation: 4,
-                          child: Container(
-                            height: 200,
-                            padding: const EdgeInsets.all(16),
-                            child: Column(
-                              mainAxisAlignment: MainAxisAlignment.center,
-                              children: [
-                                const Icon(
-                                  Icons.assignment,
-                                  size: 48,
-                                  color: Colors.orange,
-                                ),
-                                const SizedBox(height: 16),
-                                const Text(
-                                  'Leave Applications',
-                                  style: TextStyle(
-                                    fontSize: 20,
-                                    fontWeight: FontWeight.bold,
-                                  ),
-                                ),
-                                const SizedBox(height: 8),
-                                Text(
-                                  '${_leaveManager.rows.length} Applications',
-                                  style: const TextStyle(
-                                    fontSize: 16,
-                                    color: Colors.grey,
-                                  ),
-                                ),
-                              ],
+                      child: _DashboardCard(
+                        icon: Icons.apartment,
+                        iconColor: Colors.green,
+                        label: 'Hosteler',
+                        count: '${_hostelManager.rows.length} Entries',
+                        onTap: () => Navigator.of(context).push(
+                          MaterialPageRoute(
+                            builder: (_) => HostelScreen(
+                              rowsListenable: _hostelManager.notifier,
                             ),
                           ),
                         ),
@@ -1008,124 +1099,38 @@ class _HomeScreenState extends State<HomeScreen> {
                   ],
                 ),
                 const SizedBox(height: 16),
-                // Second row: Hosteller + Console
+
+                // ── Row 2: Leave Applications | Vehicle Registration ──
                 Row(
                   children: [
-                    // Hosteller Block
+                    // Leave Applications
                     Expanded(
-                      child: InkWell(
-                        onTap: () {
-                          Navigator.of(context).push(
-                            MaterialPageRoute(
-                              builder: (_) => HostelScreen(
-                                rowsListenable: _hostelManager.notifier,
-                              ),
-                            ),
-                          );
-                        },
-                        child: Card(
-                          elevation: 4,
-                          child: Container(
-                            height: 200,
-                            padding: const EdgeInsets.all(16),
-                            child: Column(
-                              mainAxisAlignment: MainAxisAlignment.center,
-                              children: [
-                                const Icon(
-                                  Icons.apartment,
-                                  size: 48,
-                                  color: Colors.green,
-                                ),
-                                const SizedBox(height: 16),
-                                const Text(
-                                  'Hosteller',
-                                  style: TextStyle(
-                                    fontSize: 20,
-                                    fontWeight: FontWeight.bold,
-                                  ),
-                                ),
-                                const SizedBox(height: 8),
-                                Text(
-                                  '${_hostelManager.rows.length} Entries',
-                                  style: const TextStyle(
-                                    fontSize: 16,
-                                    color: Colors.grey,
-                                  ),
-                                ),
-                              ],
+                      child: _DashboardCard(
+                        icon: Icons.assignment,
+                        iconColor: Colors.orange,
+                        label: 'Leave Applications',
+                        count: '${_leaveManager.rows.length} Applications',
+                        onTap: () => Navigator.of(context).push(
+                          MaterialPageRoute(
+                            builder: (_) => LeaveApplicationsScreen(
+                              applicationsListenable: _leaveManager.notifier,
                             ),
                           ),
                         ),
                       ),
                     ),
                     const SizedBox(width: 16),
-                    // Console Block
+                    // Vehicle Registration
                     Expanded(
-                      child: InkWell(
-                        onTap: () {
-                          _scaffoldKey.currentState?.showBottomSheet(
-                            (context) => Container(
-                              height: 400,
-                              color: Colors.white,
-                              child: Column(
-                                children: [
-                                  Padding(
-                                    padding: const EdgeInsets.only(
-                                      top: 8,
-                                      right: 8,
-                                    ),
-                                    child: Align(
-                                      alignment: Alignment.topRight,
-                                      child: IconButton(
-                                        icon: const Icon(Icons.close),
-                                        onPressed: () =>
-                                            Navigator.of(context).pop(),
-                                      ),
-                                    ),
-                                  ),
-                                  Expanded(
-                                    child: _buildConsoleView(
-                                      showControls: false,
-                                    ),
-                                  ),
-                                ],
-                              ),
-                            ),
-                          );
-                        },
-                        child: Card(
-                          elevation: 4,
-                          child: Container(
-                            height: 200,
-                            padding: const EdgeInsets.all(16),
-                            decoration: BoxDecoration(
-                              borderRadius: BorderRadius.circular(4),
-                            ),
-                            child: Column(
-                              mainAxisAlignment: MainAxisAlignment.center,
-                              children: [
-                                const Icon(
-                                  Icons.code,
-                                  size: 48,
-                                  color: Colors.purple,
-                                ),
-                                const SizedBox(height: 16),
-                                const Text(
-                                  'Console',
-                                  style: TextStyle(
-                                    fontSize: 20,
-                                    fontWeight: FontWeight.bold,
-                                  ),
-                                ),
-                                const SizedBox(height: 8),
-                                Text(
-                                  '${_logs.length} Logs',
-                                  style: const TextStyle(
-                                    fontSize: 16,
-                                    color: Colors.grey,
-                                  ),
-                                ),
-                              ],
+                      child: _DashboardCard(
+                        icon: Icons.directions_car,
+                        iconColor: Colors.deepOrange,
+                        label: 'Vehicle Registration',
+                        count: '${_vehicleManager.rows.length} Vehicles',
+                        onTap: () => Navigator.of(context).push(
+                          MaterialPageRoute(
+                            builder: (_) => VehicleScreen(
+                              manager: _vehicleManager,
                             ),
                           ),
                         ),
@@ -1134,7 +1139,8 @@ class _HomeScreenState extends State<HomeScreen> {
                   ],
                 ),
                 const SizedBox(height: 24),
-                // Console View Section (below blocks)
+
+                // ── Console (full width, alone) ───────────────────────
                 Card(
                   elevation: 4,
                   child: Container(
@@ -1183,10 +1189,12 @@ class _HomeScreenState extends State<HomeScreen> {
                   children: [
                     const Icon(Icons.wifi_off, color: Colors.white, size: 20),
                     const SizedBox(width: 10),
-                    const Expanded(
+                    Expanded(
                       child: Text(
-                        '⚠ No Internet Connection — Firebase sync is paused. Scanned entries will not be processed until connection is restored.',
-                        style: TextStyle(color: Colors.white, fontSize: 13, fontWeight: FontWeight.w500),
+                        _scanQueueService.isNotEmpty
+                            ? '⚠ No Internet — ${_scanQueueService.length} scan(s) queued and will be processed automatically when connection is restored.'
+                            : '⚠ No Internet Connection — Firebase sync is paused. Scanned entries will be queued and processed when connection is restored.',
+                        style: const TextStyle(color: Colors.white, fontSize: 13, fontWeight: FontWeight.w500),
                       ),
                     ),
                   ],
@@ -1265,4 +1273,80 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
 
+}
+
+/// Reusable premium dashboard card used by _buildMainContent().
+class _DashboardCard extends StatelessWidget {
+  final IconData icon;
+  final Color iconColor;
+  final String label;
+  final String count;
+  final VoidCallback onTap;
+
+  const _DashboardCard({
+    required this.icon,
+    required this.iconColor,
+    required this.label,
+    required this.count,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(12),
+      child: Card(
+        elevation: 4,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+        child: Container(
+          height: 160,
+          padding: const EdgeInsets.all(20),
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(12),
+            gradient: LinearGradient(
+              colors: [
+                iconColor.withOpacity(0.08),
+                Colors.white,
+              ],
+              begin: Alignment.topLeft,
+              end: Alignment.bottomRight,
+            ),
+          ),
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Container(
+                padding: const EdgeInsets.all(10),
+                decoration: BoxDecoration(
+                  color: iconColor.withOpacity(0.12),
+                  shape: BoxShape.circle,
+                ),
+                child: Icon(icon, size: 32, color: iconColor),
+              ),
+              const SizedBox(height: 14),
+              Text(
+                label,
+                style: const TextStyle(
+                  fontSize: 17,
+                  fontWeight: FontWeight.bold,
+                  color: Color(0xFF1A1A2E),
+                ),
+              ),
+              const SizedBox(height: 4),
+              Text(
+                count,
+                style: TextStyle(
+                  fontSize: 13,
+                  color: Colors.grey.shade600,
+                  fontWeight: FontWeight.w500,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
 }

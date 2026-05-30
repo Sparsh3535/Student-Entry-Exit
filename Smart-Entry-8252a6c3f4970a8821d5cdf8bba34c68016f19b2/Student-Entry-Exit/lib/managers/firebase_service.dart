@@ -221,6 +221,75 @@ class FirebaseService {
     }
   }
 
+  /// Fetch all documents from the `vehicle_requests` collection and return
+  /// only those where `status` is NOT "pending".
+  ///
+  /// This is called by VehicleManager on a polling schedule (1 min / 5 min).
+  Future<List<Map<String, dynamic>>> fetchAllVehicleRequests() async {
+    print('[Firebase Service] Fetching all vehicle_history...');
+    try {
+      final snapshot =
+          await _firestore.collection('vehicle_history').get();
+
+      final results = <Map<String, dynamic>>[];
+      for (final doc in snapshot.docs) {
+        final data = doc.data() as Map<String, dynamic>;
+        final status = (data['status']?.toString() ?? '').toLowerCase().trim();
+
+        // Only show approved/active entries — skip pending, rejected, denied, etc.
+        if (status != 'approved' && status != 'active') continue;
+
+        results.add(_normalizeVehicleRequestData(data, doc.id));
+      }
+
+      print('[Firebase Service] ✓ vehicle_requests: ${snapshot.docs.length} total, ${results.length} non-pending');
+      return results;
+    } catch (e) {
+      print('[Firebase Service] ✗ Error fetching vehicle_requests: $e');
+      rethrow;
+    }
+  }
+
+  /// Normalize a vehicle_requests document into the display format expected
+  /// by VehicleScreen.
+  ///
+  /// Fields displayed:
+  ///   rollNumber, name, phone, vehicleNumber, vehicleType,
+  ///   visitDate, visitorName, visitorPhone
+  Map<String, dynamic> _normalizeVehicleRequestData(
+      Map<String, dynamic> data, String docId) {
+    return {
+      '_docId': docId,
+      'rollNumber': data['rollNumber']?.toString() ?? '',
+      'name': data['name']?.toString() ?? '',
+      'phone': data['phone']?.toString() ?? '',
+      'vehicleNumber': data['vehicleNumber']?.toString() ?? '',
+      'vehicleType': data['vehicleType']?.toString() ?? '',
+      'visitDate': _formatTimestampToDate(data['visitDate']),
+      'visitorName': data['visitorName']?.toString() ?? '',
+      'visitorPhone': data['visitorPhone']?.toString() ?? '',
+      'status': data['status']?.toString() ?? '',
+      // Extra context fields (not displayed in table but useful for debugging)
+      'hostel': data['hostel']?.toString() ?? '',
+      'degree': data['degree']?.toString() ?? '',
+      'purpose': data['purpose']?.toString() ?? '',
+      'relationship': data['relationship']?.toString() ?? '',
+      'numberOfMembers': data['numberOfMembers']?.toString() ?? '',
+    };
+  }
+
+  /// Delete a document from `vehicle_history`.
+  /// Called by VehicleManager when both IN and OUT times are recorded.
+  Future<void> deleteVehicleHistoryDocument(String docId) async {
+    try {
+      await _firestore.collection('vehicle_history').doc(docId).delete();
+      print('[Firebase Service] ✓ Deleted vehicle_history/$docId');
+    } catch (e) {
+      print('[Firebase Service] ✗ Error deleting vehicle_history/$docId: $e');
+      rethrow;
+    }
+  }
+
   /// Normalize gate_passes data to QRAuthenticator format
   Map<String, dynamic> _normalizeGatePassData(Map<String, dynamic> data) {
     // Extract rollno and name from combined name field if available
@@ -260,6 +329,9 @@ class FirebaseService {
       'scanCount': data['scanCount'] ?? 0,
       'location': location,
       'security': null,
+      // Vehicle-specific fields (populated when type = 'vehicle')
+      'vehicleNumber': data['vehicleNumber']?.toString() ?? data['vehicle_number']?.toString() ?? data['registrationNumber']?.toString() ?? '',
+      'vehicleType': data['vehicleType']?.toString() ?? data['vehicle_type']?.toString() ?? data['typeOfVehicle']?.toString() ?? data['type_of_vehicle']?.toString() ?? '',
     };
   }
 

@@ -55,6 +55,11 @@ class HostelManager {
       _lastScanTime[scanKey] = DateTime.now();
     }
 
+    // Resolve the timestamp to record:
+    // • If this scan was queued offline, _scanTime holds the original scan time.
+    // • Otherwise use the current time (live scan).
+    final String now = _resolveScanTime(fields);
+
     final existingIndex = findExistingRowIndex(_hostelRows, id, phone, name);
     _log('[HOSTEL MANAGER] Found existing row at index: $existingIndex');
 
@@ -62,7 +67,6 @@ class HostelManager {
       final r = _hostelRows[existingIndex];
       final prevIn = r['intime'] as String?;
       final prevOut = r['outtime'] as String?;
-      final now = shortDateTime(DateTime.now());
 
       // Check if this scan is from a DIFFERENT gate pass (different _docId)
       final existingDocId = r['_docId']?.toString() ?? '';
@@ -150,7 +154,7 @@ class HostelManager {
     // not found -> add with outtime set (first scan, preserve all incoming fields)
     final normalized = Map<String, dynamic>.from(fields);
     normalized['intime'] = null;
-    normalized['outtime'] = shortDateTime(DateTime.now());
+    normalized['outtime'] = _resolveScanTime(fields); // actual scan time, not now
     normalized['security'] = SecurityNameService().name;
     _log('[HOSTEL MANAGER] Creating new row: $normalized');
     _hostelRows.add(normalized);
@@ -172,6 +176,19 @@ class HostelManager {
       '[HOSTEL MANAGER] ✓ Notifier updated with ${notifier.value.length} rows',
     );
     _log('[HOSTEL MANAGER] Notifier value: ${notifier.value}');
+  }
+
+  /// Returns the timestamp to record for this scan:
+  /// - If fields contains '_scanTime' (queued offline scan), use that —
+  ///   it is the time the student ACTUALLY scanned, not when internet returned.
+  /// - Otherwise use the current time (live scan).
+  String _resolveScanTime(Map<String, dynamic> fields) {
+    final queued = fields['_scanTime']?.toString() ?? '';
+    if (queued.isNotEmpty) {
+      _log('[HOSTEL MANAGER] ⏱ Using queued scan time: $queued');
+      return queued;
+    }
+    return shortDateTime(DateTime.now());
   }
 
   /// Helper method for logging

@@ -85,14 +85,16 @@ class _HostelScreenState extends State<HostelScreen> {
                     builder: (context, rows, _) {
                       var filtered = rows.where(_matchesSearch).toList();
 
-                      // After 9 PM: unfilled entries (missing intime) go to top
+                      // After 9 PM: students who haven't returned yet (intime empty) float to top
+                      // intime = return time (2nd scan) — empty means student is still out
                       if (DateTime.now().hour >= 21) {
                         filtered.sort((a, b) {
                           final aIn = _cell(a, ['intime', 'in_time', 'inTime']).trim();
                           final bIn = _cell(b, ['intime', 'in_time', 'inTime']).trim();
+                          // Students still out (intime empty = 0) go BEFORE returned students (intime filled = 1)
                           final aFilled = aIn.isNotEmpty ? 1 : 0;
                           final bFilled = bIn.isNotEmpty ? 1 : 0;
-                          return aFilled.compareTo(bFilled); // unfilled (0) before filled (1)
+                          return aFilled.compareTo(bFilled);
                         });
                       }
                       if (rows.isEmpty) {
@@ -130,8 +132,10 @@ class _HostelScreenState extends State<HostelScreen> {
                                     DataColumn(label: Text('Phone', style: TextStyle(fontWeight: FontWeight.bold))),
                                     DataColumn(label: Text('Room Number', style: TextStyle(fontWeight: FontWeight.bold))),
                                     DataColumn(label: Text('Location', style: TextStyle(fontWeight: FontWeight.bold))),
-                                    DataColumn(label: Text('In Time', style: TextStyle(fontWeight: FontWeight.bold))),
-                                    DataColumn(label: Text('Out Time', style: TextStyle(fontWeight: FontWeight.bold))),
+                                    // Out Time is FIRST — hostel flow: scan 1 = student leaving (outtime)
+                                    DataColumn(label: Text('Out Time', style: TextStyle(fontWeight: FontWeight.bold, color: Color(0xFFD32F2F)))),
+                                    // In Time is SECOND — scan 2 = student returning (intime)
+                                    DataColumn(label: Text('In Time', style: TextStyle(fontWeight: FontWeight.bold, color: Color(0xFF2E7D32)))),
                                     DataColumn(label: Text('Security', style: TextStyle(fontWeight: FontWeight.bold))),
                                   ],
                                   rows: filtered.map((r) {
@@ -154,21 +158,25 @@ class _HostelScreenState extends State<HostelScreen> {
                                       return Colors.grey.shade400;
                                     }
 
-                                    Widget intimeWidget() {
-                                      if (intime.isEmpty) return const SelectableText('');
-                                      return SelectableText(
-                                        intime,
-                                        style: const TextStyle(color: Color(0xFF2E7D32), fontWeight: FontWeight.w600, fontSize: 14),
-                                      );
-                                    }
-
                                     Widget outtimeWidget() {
                                       if (outtime.isEmpty) {
                                         return const Text('\u2014', style: TextStyle(color: Colors.black45));
                                       }
+                                      // outtime = first scan = student LEAVING hostel → red (going out)
                                       return Text(
                                         outtime,
                                         style: const TextStyle(color: Color(0xFFD32F2F), fontWeight: FontWeight.w600, fontSize: 14),
+                                      );
+                                    }
+
+                                    Widget intimeWidget() {
+                                      if (intime.isEmpty) {
+                                        return const Text('\u2014', style: TextStyle(color: Colors.black45));
+                                      }
+                                      // intime = second scan = student RETURNING to hostel → green (back safe)
+                                      return SelectableText(
+                                        intime,
+                                        style: const TextStyle(color: Color(0xFF2E7D32), fontWeight: FontWeight.w600, fontSize: 14),
                                       );
                                     }
 
@@ -181,8 +189,10 @@ class _HostelScreenState extends State<HostelScreen> {
                                         DataCell(SelectableText(phone, style: cellStyle)),
                                         DataCell(SelectableText(roomNumber, style: cellStyle)),
                                         DataCell(SelectableText(location, style: cellStyle)),
-                                        DataCell(intimeWidget()),
+                                        // Out Time FIRST (matches column order above)
                                         DataCell(outtimeWidget()),
+                                        // In Time SECOND
+                                        DataCell(intimeWidget()),
                                         DataCell(
                                           chipLabel.isEmpty
                                               ? const SizedBox.shrink()

@@ -42,10 +42,14 @@ int findExistingRowIndex(
         r['name'].toString() == name;
 
     if (sameById || sameByPhone || sameByName) {
-      // Check if this row is incomplete (missing outtime or returning)
+      // Check if this row is incomplete (missing intime, outtime, or returning)
+      // Day scholar: incomplete when outtime is empty (intime filled first)
+      // Hostel: incomplete when intime is empty (outtime filled first)
+      // Leave: incomplete when returning is empty
+      final intime = (r['intime']?.toString() ?? '').trim();
       final outtime = (r['outtime']?.toString() ?? '').trim();
       final returning = (r['returning']?.toString() ?? '').trim();
-      final isIncomplete = outtime.isEmpty && returning.isEmpty;
+      final isIncomplete = intime.isEmpty || outtime.isEmpty || returning.isEmpty;
 
       if (isIncomplete && lastIncomplete < 0) {
         lastIncomplete = i;

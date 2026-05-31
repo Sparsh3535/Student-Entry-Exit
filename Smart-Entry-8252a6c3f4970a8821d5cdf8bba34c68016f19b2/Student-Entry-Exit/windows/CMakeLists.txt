@@ -2,6 +2,10 @@
 cmake_minimum_required(VERSION 3.14)
 project(smart_entry LANGUAGES CXX)
 
+# Force a minimum CMake policy version of 3.5 for compatible builds with newer CMake versions.
+# This must be a CACHE variable so it propagates to all subdirectories (e.g., Firebase SDK).
+set(CMAKE_POLICY_VERSION_MINIMUM 3.5 CACHE STRING "Minimum CMake policy version" FORCE)
+
 # The name of the executable created for the application. Change this to change
 # the on-disk name of your application.
 set(BINARY_NAME "smart_entry")

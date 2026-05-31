@@ -81,12 +81,12 @@ class ScanQueueService {
 
   /// Add a docId to the tail of the queue (FIFO — enqueue at back).
   /// The queue is persisted to disk immediately.
+  ///
+  /// The same docId CAN appear multiple times — each entry represents a
+  /// distinct scan event (e.g., in-time scan followed by out-time scan for
+  /// the same student). The managers' cooldown logic handles genuine
+  /// accidental double-scans.
   Future<void> enqueue(String docId) async {
-    // Prevent duplicate entries — don't enqueue the same docId twice
-    if (_queue.any((e) => e.docId == docId)) {
-      _log('[QUEUE] ⚠ docId already in queue, skipping duplicate: $docId');
-      return;
-    }
 
     final now = DateTime.now();
     final ts =

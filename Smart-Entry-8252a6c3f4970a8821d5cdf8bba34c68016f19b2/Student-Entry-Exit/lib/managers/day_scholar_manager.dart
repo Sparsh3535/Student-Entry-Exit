@@ -37,16 +37,24 @@ class DayScholarManager {
     _log('[DAY SCHOLAR MANAGER] name=$name, id=$id, phone=$phone');
     _log('[DAY SCHOLAR MANAGER] Current total rows: ${_dayRows.length}');
 
-    // Cooldown: ignore duplicate scans within 10 seconds for the same student
+    // Cooldown: ignore duplicate scans within 10 seconds for the same student.
+    // For queued (offline) scans, use the ACTUAL scan time — not DateTime.now() —
+    // because during queue drain, multiple scans are processed back-to-back and
+    // DateTime.now() would always be within the cooldown window.
     final scanKey = id ?? phone ?? name ?? '';
     if (scanKey.isNotEmpty) {
+      final queuedTime = fields['_scanTime']?.toString() ?? '';
+      final scanMoment = queuedTime.isNotEmpty
+          ? (DateTime.tryParse(queuedTime) ?? DateTime.now())
+          : DateTime.now();
+
       final lastScan = _lastScanTime[scanKey];
-      if (lastScan != null && DateTime.now().difference(lastScan) < _scanCooldown) {
+      if (lastScan != null && scanMoment.difference(lastScan).abs() < _scanCooldown) {
         _log('[DAY SCHOLAR MANAGER] ⚠ COOLDOWN: Ignoring duplicate scan for $scanKey (within 10s)');
         logCallback?.call('DayScholar: duplicate scan ignored for $scanKey (10s cooldown)');
         return;
       }
-      _lastScanTime[scanKey] = DateTime.now();
+      _lastScanTime[scanKey] = scanMoment;
     }
 
     // Resolve the timestamp to record:

@@ -249,15 +249,29 @@ class _HomeScreenState extends State<HomeScreen> {
 
   /// Drain the offline scan queue in FIFO order.
   /// Each queued docId is retried as a fresh Firebase fetch.
-  /// If a fetch fails (still no internet), the entry is re-queued at the
-  /// front and draining stops — it will be retried on the next
-  /// connectivity check (every 15 seconds).
+  ///
+  /// Uses a peek-then-dequeue pattern: the entry stays at the head of the
+  /// queue until processing succeeds. If a fetch fails (still no internet,
+  /// null result, or exception), draining stops and the entry remains queued
+  /// for the next retry cycle (every 15 seconds).
+  ///
+  /// **Duplicate docId handling**: When the same docId appears multiple times
+  /// (e.g., in-time scan + out-time scan for the same student while offline),
+  /// the 1st entry creates the row via Firebase fetch. For subsequent entries
+  /// with the same docId, we first try to find the existing local row and
+  /// update it directly — no Firebase fetch needed. This handles the case
+  /// where the Firebase doc may have been deleted by onEntryComplete.
   Future<void> _drainScanQueue() async {
     if (_isDrainingQueue) return; // prevent concurrent runs
     _isDrainingQueue = true;
 
     final total = _scanQueueService.length;
     _log('[QUEUE] 🌐 Internet restored — draining $total queued scan(s)...');
+
+    // Track docIds we've already successfully fetched from Firebase in this
+    // drain session. For repeated docIds, we can reuse the cached data
+    // instead of hitting Firebase again (the doc may have been deleted).
+    final Map<String, Map<String, dynamic>> _fetchedDataCache = {};
 
     int processed = 0;
     while (_scanQueueService.isNotEmpty) {
@@ -275,16 +289,64 @@ class _HomeScreenState extends State<HomeScreen> {
         break;
       }
 
-      final entry = await _scanQueueService.dequeue();
+      // Peek at the head — do NOT remove yet
+      final entry = _scanQueueService.peek();
       if (entry == null) break;
 
       processed++;
       _log('[QUEUE] ↩ Processing queued scan $processed/$total: ${entry.docId} (was queued at: ${entry.enqueuedAt})');
 
-      // Fetch from Firebase — this goes through the normal processing pipeline.
-      // Pass enqueuedAt as scanTime so the recorded timestamp = actual scan time,
-      // NOT the current time (which would be wrong — delayed by offline period).
-      await _fetchAndProcessFromFirebase(entry.docId, scanTime: entry.enqueuedAt);
+      bool success;
+
+      // Check if we already have cached data for this docId (from a
+      // previous entry in this same drain session). If so, reuse it —
+      // the Firebase doc may have been deleted by onEntryComplete.
+      if (_fetchedDataCache.containsKey(entry.docId)) {
+        _log('[QUEUE] ♻ Reusing cached data for ${entry.docId} (already fetched in this drain session)');
+        final cachedData = Map<String, dynamic>.from(_fetchedDataCache[entry.docId]!);
+        cachedData['_docId'] = entry.docId;
+        cachedData['_scanTime'] = entry.enqueuedAt;
+        _log('[QUEUE] ⏱ Using queued scan time: ${entry.enqueuedAt}');
+        _qrAuthenticator.processMap(cachedData);
+        success = true;
+      } else {
+        // First time seeing this docId — fetch from Firebase
+        success = await _fetchAndProcessFromFirebase(entry.docId, scanTime: entry.enqueuedAt);
+
+        // If successful, cache the fetched data for potential reuse
+        if (success) {
+          // Reconstruct the data we'd get from Firebase for this docId
+          // by fetching it one more time from the service (it's fast, already cached)
+          try {
+            final data = await _firebaseService.fetchByDocumentId(entry.docId);
+            if (data != null) {
+              _fetchedDataCache[entry.docId] = data;
+            }
+          } catch (_) {
+            // Non-critical — if the doc was already deleted by onEntryComplete,
+            // we'll still try to build cache data from the managers' local rows
+          }
+
+          // Fallback: build cache from local rows if Firebase fetch failed
+          if (!_fetchedDataCache.containsKey(entry.docId)) {
+            final localRow = _findLocalRowByDocId(entry.docId);
+            if (localRow != null) {
+              _fetchedDataCache[entry.docId] = Map<String, dynamic>.from(localRow);
+              _log('[QUEUE] 📋 Cached local row data for ${entry.docId}');
+            }
+          }
+        }
+      }
+
+      if (success) {
+        // Processing succeeded — NOW remove the entry from the queue
+        await _scanQueueService.dequeue();
+      } else {
+        // Processing failed — leave the entry in the queue for next retry
+        _log('[QUEUE] ⚠ Processing failed for ${entry.docId} — leaving in queue for retry');
+        await _scanQueueService.incrementHeadAttempts();
+        break; // stop drain, will retry on next connectivity check
+      }
     }
 
     if (_scanQueueService.isEmpty) {
@@ -294,6 +356,21 @@ class _HomeScreenState extends State<HomeScreen> {
     }
 
     _isDrainingQueue = false;
+  }
+
+  /// Search all managers for a local row matching the given _docId.
+  /// Returns the row data if found, null otherwise.
+  Map<String, dynamic>? _findLocalRowByDocId(String docId) {
+    for (final row in _dayScholarManager.rows) {
+      if (row['_docId']?.toString() == docId) return row;
+    }
+    for (final row in _hostelManager.rows) {
+      if (row['_docId']?.toString() == docId) return row;
+    }
+    for (final row in _leaveManager.rows) {
+      if (row['_docId']?.toString() == docId) return row;
+    }
+    return null;
   }
 
   /// Start a periodic timer that checks every 30 seconds.
@@ -708,13 +785,17 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   /// Fetch student data from Firebase by document ID and process it.
-  /// If the fetch fails due to a network error AND we are not currently
-  /// draining the queue, the docId is enqueued for retry when internet returns.
+  ///
+  /// Returns `true` if the scan was successfully fetched and processed.
+  /// Returns `false` on any failure (network error, null result, exception).
+  ///
+  /// On failure during a LIVE scan (not queue drain), the docId is
+  /// enqueued for retry when internet returns.
   ///
   /// [scanTime] — optional. When processing a queued scan, this is the
   /// timestamp from when the student ACTUALLY scanned (enqueuedAt), not now.
   /// If null, the current time is used (normal live scan behaviour).
-  Future<void> _fetchAndProcessFromFirebase(String docId, {String? scanTime}) async {
+  Future<bool> _fetchAndProcessFromFirebase(String docId, {String? scanTime}) async {
     try {
       final totalSw = Stopwatch()..start();
       _log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
@@ -726,7 +807,7 @@ class _HomeScreenState extends State<HomeScreen> {
         _log('[SCANNER] ⚠ No internet — queuing scan for later retry');
         await _scanQueueService.enqueue(docId);
         _log('[QUEUE] 📄 Queue file: ${ScanQueueService().toString()}');
-        return;
+        return false;
       }
 
       _log('[FIREBASE] Fetching document from database...');
@@ -756,14 +837,20 @@ class _HomeScreenState extends State<HomeScreen> {
 
         totalSw.stop();
         _log('[TIMING] ✓ Total pipeline: ${totalSw.elapsedMilliseconds}ms');
+        return true;
       } else {
         _log('');
-        _log('✗✗✗ FIREBASE FETCH FAILED ✗✗✗');
+        _log('✗✗✗ FIREBASE FETCH RETURNED NULL ✗✗✗');
         _log('✗ No student found in Firebase for docId: $docId');
-        _log('Please verify:');
-        _log('  - Document ID is correct');
-        _log('  - Document exists in gate_passes or leave_requests collection');
-        _log('  - Firebase connection is working');
+        _log('  This may be a transient issue (stale connectivity, cache miss)');
+        // Queue for retry during live scans — the doc may become available
+        // once true connectivity is restored. During queue drain, the drain
+        // loop handles retries by leaving the entry at the head.
+        if (!_isDrainingQueue) {
+          _log('  → Queuing scan for retry when connectivity is confirmed');
+          await _scanQueueService.enqueue(docId);
+        }
+        return false;
       }
     } catch (e) {
       // ── Network error: queue the scan so it is retried when online ──
@@ -771,8 +858,8 @@ class _HomeScreenState extends State<HomeScreen> {
         _log('');
         _log('✗ NETWORK ERROR — queuing scan for retry when internet returns');
         _log('✗ Error: $e');
-        // Only enqueue from a LIVE scan (not during a queue drain — if we're
-        // draining and still failing, the drain loop handles re-queuing)
+        // Only enqueue from a LIVE scan (not during a queue drain — the drain
+        // loop keeps the entry at the head for automatic retry)
         if (!_isDrainingQueue) {
           await _scanQueueService.enqueue(docId);
         }
@@ -783,6 +870,7 @@ class _HomeScreenState extends State<HomeScreen> {
         _log('✗✗✗ ERROR DURING FIREBASE LOOKUP ✗✗✗');
         _log('✗ Firebase lookup failed for docId "$docId": $e');
       }
+      return false;
     }
   }
 

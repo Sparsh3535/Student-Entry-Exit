@@ -4,7 +4,11 @@ import 'dart:math' as math;
 
 class HostelScreen extends StatefulWidget {
   final ValueListenable<List<Map<String, dynamic>>> rowsListenable;
-  const HostelScreen({super.key, required this.rowsListenable});
+  /// Callback when a security guard manually sets a time field.
+  /// Parameters: (rowIndex in the FULL unfiltered list, field name, formatted time string)
+  final void Function(int rowIndex, String field, String formattedTime)? onTimeEdited;
+
+  const HostelScreen({super.key, required this.rowsListenable, this.onTimeEdited});
 
   @override
   State<HostelScreen> createState() => _HostelScreenState();
@@ -38,6 +42,22 @@ class _HostelScreenState extends State<HostelScreen> {
     final id = _cell(row, ['id', 'Id', 'roll', 'roll_no', 'rollno', 'Roll Number']).toLowerCase();
     final name = _cell(row, ['name', 'Name', 'fullName', 'fullname']).toLowerCase();
     return id.contains(q) || name.contains(q);
+  }
+
+  /// Show a time picker and return the selected time formatted as "yyyy-MM-dd HH:mm:ss"
+  Future<void> _pickTime(int originalIndex, String field) async {
+    final picked = await showTimePicker(
+      context: context,
+      initialTime: TimeOfDay.now(),
+      helpText: 'Select ${field == 'intime' ? 'In' : 'Out'} Time',
+    );
+    if (picked != null && widget.onTimeEdited != null) {
+      final now = DateTime.now();
+      final dt = DateTime(now.year, now.month, now.day, picked.hour, picked.minute, 0);
+      String two(int n) => n.toString().padLeft(2, '0');
+      final formatted = '${dt.year}-${two(dt.month)}-${two(dt.day)} ${two(dt.hour)}:${two(dt.minute)}:${two(dt.second)}';
+      widget.onTimeEdited!(originalIndex, field, formatted);
+    }
   }
 
   @override
@@ -83,15 +103,19 @@ class _HostelScreenState extends State<HostelScreen> {
                   child: ValueListenableBuilder<List<Map<String, dynamic>>>(
                     valueListenable: widget.rowsListenable,
                     builder: (context, rows, _) {
-                      var filtered = rows.where(_matchesSearch).toList();
+                      // Build index map: filtered row -> original index in the full list
+                      final indexedRows = <MapEntry<int, Map<String, dynamic>>>[];
+                      for (var i = 0; i < rows.length; i++) {
+                        if (_matchesSearch(rows[i])) {
+                          indexedRows.add(MapEntry(i, rows[i]));
+                        }
+                      }
 
                       // After 9 PM: students who haven't returned yet (intime empty) float to top
-                      // intime = return time (2nd scan) — empty means student is still out
                       if (DateTime.now().hour >= 21) {
-                        filtered.sort((a, b) {
-                          final aIn = _cell(a, ['intime', 'in_time', 'inTime']).trim();
-                          final bIn = _cell(b, ['intime', 'in_time', 'inTime']).trim();
-                          // Students still out (intime empty = 0) go BEFORE returned students (intime filled = 1)
+                        indexedRows.sort((a, b) {
+                          final aIn = _cell(a.value, ['intime', 'in_time', 'inTime']).trim();
+                          final bIn = _cell(b.value, ['intime', 'in_time', 'inTime']).trim();
                           final aFilled = aIn.isNotEmpty ? 1 : 0;
                           final bFilled = bIn.isNotEmpty ? 1 : 0;
                           return aFilled.compareTo(bFilled);
@@ -100,7 +124,7 @@ class _HostelScreenState extends State<HostelScreen> {
                       if (rows.isEmpty) {
                         return const Center(child: Text('No hostel entries yet.'));
                       }
-                      if (filtered.isEmpty) {
+                      if (indexedRows.isEmpty) {
                         return const Center(child: Text('No matching entries found.'));
                       }
                       return Scrollbar(
@@ -138,7 +162,9 @@ class _HostelScreenState extends State<HostelScreen> {
                                     DataColumn(label: Text('In Time', style: TextStyle(fontWeight: FontWeight.bold, color: Color(0xFF2E7D32)))),
                                     DataColumn(label: Text('Security', style: TextStyle(fontWeight: FontWeight.bold))),
                                   ],
-                                  rows: filtered.map((r) {
+                                  rows: indexedRows.map((entry) {
+                                    final originalIndex = entry.key;
+                                    final r = entry.value;
                                     final name = _cell(r, ['name', 'Name', 'fullName', 'fullname']);
                                     final id = _cell(r, ['id', 'Id', 'roll', 'roll_no', 'rollno', 'Roll Number']);
                                     final phone = _cell(r, ['phone', 'Phone', 'mobile', 'Phone Number']);
@@ -160,9 +186,8 @@ class _HostelScreenState extends State<HostelScreen> {
 
                                     Widget outtimeWidget() {
                                       if (outtime.isEmpty) {
-                                        return const Text('\u2014', style: TextStyle(color: Colors.black45));
+                                        return const Text('\u2014', style: TextStyle(color: Colors.black38));
                                       }
-                                      // outtime = first scan = student LEAVING hostel → red (going out)
                                       return Text(
                                         outtime,
                                         style: const TextStyle(color: Color(0xFFD32F2F), fontWeight: FontWeight.w600, fontSize: 14),
@@ -171,9 +196,27 @@ class _HostelScreenState extends State<HostelScreen> {
 
                                     Widget intimeWidget() {
                                       if (intime.isEmpty) {
-                                        return const Text('\u2014', style: TextStyle(color: Colors.black45));
+                                        return InkWell(
+                                          onTap: () => _pickTime(originalIndex, 'intime'),
+                                          borderRadius: BorderRadius.circular(6),
+                                          child: Container(
+                                            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                                            decoration: BoxDecoration(
+                                              border: Border.all(color: Colors.green.shade200, width: 1.5),
+                                              borderRadius: BorderRadius.circular(6),
+                                              color: Colors.green.shade50,
+                                            ),
+                                            child: Row(
+                                              mainAxisSize: MainAxisSize.min,
+                                              children: [
+                                                Icon(Icons.access_time, size: 16, color: Colors.green.shade400),
+                                                const SizedBox(width: 4),
+                                                Text('Set', style: TextStyle(color: Colors.green.shade600, fontSize: 13, fontWeight: FontWeight.w500)),
+                                              ],
+                                            ),
+                                          ),
+                                        );
                                       }
-                                      // intime = second scan = student RETURNING to hostel → green (back safe)
                                       return SelectableText(
                                         intime,
                                         style: const TextStyle(color: Color(0xFF2E7D32), fontWeight: FontWeight.w600, fontSize: 14),

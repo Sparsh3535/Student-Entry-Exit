@@ -207,4 +207,36 @@ class DayScholarManager {
     notifier.value = [];
     LocalStorageService().delete('day_scholar');
   }
+
+  /// Manually set a time field for a specific row.
+  /// Used when the security guard clicks an empty time cell and selects a time.
+  /// [rowIndex] — index in the _dayRows list
+  /// [field] — 'intime' or 'outtime'
+  /// [formattedTime] — time string in "yyyy-MM-dd HH:mm:ss" format
+  void setTimeManually(int rowIndex, String field, String formattedTime) {
+    if (rowIndex < 0 || rowIndex >= _dayRows.length) {
+      _log('[DAY SCHOLAR MANAGER] ⚠ Invalid row index: $rowIndex');
+      return;
+    }
+    final r = _dayRows[rowIndex];
+    _log('[DAY SCHOLAR MANAGER] Manual time entry: row=$rowIndex, field=$field, time=$formattedTime');
+
+    r[field] = formattedTime;
+    _dayRows[rowIndex] = Map<String, dynamic>.from(r);
+    notifier.value = List<Map<String, dynamic>>.from(_dayRows);
+    _save();
+
+    _log('[DAY SCHOLAR MANAGER] ✓ Manual $field set to $formattedTime');
+
+    // Check if both times are now filled → trigger Firebase delete
+    final intime = (r['intime']?.toString() ?? '').trim();
+    final outtime = (r['outtime']?.toString() ?? '').trim();
+    if (intime.isNotEmpty && outtime.isNotEmpty) {
+      final docId = r['_docId']?.toString();
+      if (docId != null && docId.isNotEmpty) {
+        _log('[DAY SCHOLAR MANAGER] ✓ Both times filled after manual entry — triggering onEntryComplete');
+        onEntryComplete?.call(docId);
+      }
+    }
+  }
 }

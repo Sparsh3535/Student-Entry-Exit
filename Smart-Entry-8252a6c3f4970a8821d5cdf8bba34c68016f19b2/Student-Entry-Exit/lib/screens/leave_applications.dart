@@ -4,9 +4,14 @@ import 'dart:math' as math;
 
 class LeaveApplicationsScreen extends StatefulWidget {
   final ValueListenable<List<Map<String, dynamic>>> applicationsListenable;
+  /// Callback when a security guard manually sets a time field.
+  /// Parameters: (rowIndex in the FULL unfiltered list, field name, formatted time string)
+  final void Function(int rowIndex, String field, String formattedTime)? onTimeEdited;
+
   const LeaveApplicationsScreen({
     super.key,
     required this.applicationsListenable,
+    this.onTimeEdited,
   });
 
   @override
@@ -123,6 +128,22 @@ class _LeaveApplicationsScreenState extends State<LeaveApplicationsScreen> {
     final id = _cell(row, ['id', 'Id', 'roll', 'roll number', 'Roll Number', 'rollno']).toLowerCase();
     final name = _cell(row, ['name', 'Name', 'full name', 'fullname']).toLowerCase();
     return id.contains(q) || name.contains(q);
+  }
+
+  /// Show a time picker and return the selected time formatted as "yyyy-MM-dd HH:mm:ss"
+  Future<void> _pickTime(int originalIndex, String field) async {
+    final picked = await showTimePicker(
+      context: context,
+      initialTime: TimeOfDay.now(),
+      helpText: 'Select ${field == 'leaving' ? 'Leaving' : 'Returning'} Time',
+    );
+    if (picked != null && widget.onTimeEdited != null) {
+      final now = DateTime.now();
+      final dt = DateTime(now.year, now.month, now.day, picked.hour, picked.minute, 0);
+      String two(int n) => n.toString().padLeft(2, '0');
+      final formatted = '${dt.year}-${two(dt.month)}-${two(dt.day)} ${two(dt.hour)}:${two(dt.minute)}:${two(dt.second)}';
+      widget.onTimeEdited!(originalIndex, field, formatted);
+    }
   }
 
   /// Show a small popup with granted dates when a row is tapped
@@ -277,12 +298,15 @@ class _LeaveApplicationsScreenState extends State<LeaveApplicationsScreen> {
                     child: ValueListenableBuilder<List<Map<String, dynamic>>>(
                       valueListenable: widget.applicationsListenable,
                       builder: (context, allApplications, _) {
-                        final leaves = allApplications
-                            .where((a) => _isLeave(a))
-                            .where(_matchesSearch)
+                        // Build index map: filtered row -> original index in the full list
+                        final allLeaves = allApplications.asMap().entries
+                            .where((e) => _isLeave(e.value))
+                            .toList();
+                        final indexedLeaves = allLeaves
+                            .where((e) => _matchesSearch(e.value))
                             .toList();
 
-                        if (allApplications.where((a) => _isLeave(a)).isEmpty) {
+                        if (allLeaves.isEmpty) {
                           return Center(
                             child: Column(
                               mainAxisSize: MainAxisSize.min,
@@ -295,7 +319,7 @@ class _LeaveApplicationsScreenState extends State<LeaveApplicationsScreen> {
                             ),
                           );
                         }
-                        if (leaves.isEmpty) {
+                        if (indexedLeaves.isEmpty) {
                           return Center(
                             child: Column(
                               mainAxisSize: MainAxisSize.min,
@@ -353,8 +377,8 @@ class _LeaveApplicationsScreenState extends State<LeaveApplicationsScreen> {
                                       DataColumn(label: Text('Address', style: headerStyle)),
                                       DataColumn(label: Text('Security', style: headerStyle)),
                                     ],
-                                    rows: leaves.asMap().entries.map((entry) {
-                                      final idx = entry.key;
+                                    rows: indexedLeaves.map((entry) {
+                                      final originalIndex = entry.key;
                                       final a = entry.value;
                                       final name = _cell(a, ['name', 'Name', 'full name', 'fullname']);
                                       final roll = _cell(a, ['roll number', 'Roll Number', 'roll', 'id', 'Id', 'rollno']);
@@ -378,7 +402,26 @@ class _LeaveApplicationsScreenState extends State<LeaveApplicationsScreen> {
 
                                       Widget returningWidget() {
                                         if (returning.isEmpty) {
-                                          return const Text('\u2014', style: TextStyle(color: Colors.black38));
+                                          return InkWell(
+                                            onTap: () => _pickTime(originalIndex, 'returning'),
+                                            borderRadius: BorderRadius.circular(6),
+                                            child: Container(
+                                              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                                              decoration: BoxDecoration(
+                                                border: Border.all(color: Colors.red.shade200, width: 1.5),
+                                                borderRadius: BorderRadius.circular(6),
+                                                color: Colors.red.shade50,
+                                              ),
+                                              child: Row(
+                                                mainAxisSize: MainAxisSize.min,
+                                                children: [
+                                                  Icon(Icons.access_time, size: 16, color: Colors.red.shade400),
+                                                  const SizedBox(width: 4),
+                                                  Text('Set', style: TextStyle(color: Colors.red.shade600, fontSize: 13, fontWeight: FontWeight.w500)),
+                                                ],
+                                              ),
+                                            ),
+                                          );
                                         }
                                         return Text(
                                           returning,
@@ -422,6 +465,7 @@ class _LeaveApplicationsScreenState extends State<LeaveApplicationsScreen> {
                                         color: Colors.black87,
                                       );
 
+                                      final idx = indexedLeaves.indexOf(entry);
                                       Color rowColor;
                                       if (highlight) {
                                         rowColor = const Color(0xFFFFCDD2);

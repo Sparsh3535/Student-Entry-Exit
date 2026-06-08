@@ -332,6 +332,8 @@ class FirebaseService {
       // Vehicle-specific fields (populated when type = 'vehicle')
       'vehicleNumber': data['vehicleNumber']?.toString() ?? data['vehicle_number']?.toString() ?? data['registrationNumber']?.toString() ?? '',
       'vehicleType': data['vehicleType']?.toString() ?? data['vehicle_type']?.toString() ?? data['typeOfVehicle']?.toString() ?? data['type_of_vehicle']?.toString() ?? '',
+      // App version — used to check if student's app is up to date
+      'version': data['version']?.toString() ?? data['appVersion']?.toString() ?? '',
     };
   }
 
@@ -478,6 +480,8 @@ class FirebaseService {
       'returnTime': returnTime,
       'extended': isExtended && extensionStatus == 'approved',
       'security': null,
+      // App version — used to check if student's app is up to date
+      'version': data['version']?.toString() ?? data['appVersion']?.toString() ?? '',
     };
   }
 

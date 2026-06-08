@@ -18,6 +18,8 @@ import 'day_scholar.dart';
 import 'leave_applications.dart';
 import 'hostel.dart';
 import 'vehicle_screen.dart';
+import 'login_screen.dart';
+import '../managers/auth_service.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -820,6 +822,25 @@ class _HomeScreenState extends State<HomeScreen> {
         _log('✓ FIREBASE FETCH SUCCESSFUL');
         _log('[DATA] Type: ${studentData['type']}, Name: ${studentData['name']}, ID: ${studentData['id']}');
 
+        // ── VERSION CHECK: Require v2+ ──────────────────────────────────
+        final version = (studentData['version']?.toString() ?? '').trim().toLowerCase();
+        _log('[VERSION] Student app version: "${version.isEmpty ? "(none)" : version}"');
+
+        // Accept v2, v3, v4, ... — reject empty, v1, or any non-v2+ value
+        final versionNum = _parseVersionNumber(version);
+        if (versionNum < 2) {
+          _log('[VERSION] ❌ BLOCKED — student is on outdated version ($version). v2+ required.');
+          final studentName = studentData['name']?.toString() ?? 'Unknown';
+          final studentId = studentData['id']?.toString() ?? '';
+          // Show warning dialog (only for live scans and if context is available)
+          if (mounted && !_isDrainingQueue) {
+            _showVersionWarning(studentName, studentId, version);
+          }
+          // Return true to prevent queue from retrying forever
+          return true;
+        }
+        // ── END VERSION CHECK ────────────────────────────────────────────
+
         // Pass the fetched data directly to QRAuthenticator as a Map
         studentData['_docId'] = docId;
 
@@ -872,6 +893,117 @@ class _HomeScreenState extends State<HomeScreen> {
       }
       return false;
     }
+  }
+
+  /// Parse a version string like "v2", "V3", "v10" → numeric part (2, 3, 10).
+  /// Returns 0 for empty, null, or unparseable strings.
+  int _parseVersionNumber(String version) {
+    if (version.isEmpty) return 0;
+    // Remove leading 'v' or 'V', then parse the number
+    final cleaned = version.replaceAll(RegExp(r'^[vV]'), '').trim();
+    return int.tryParse(cleaned) ?? 0;
+  }
+
+  /// Show a prominent warning dialog when a student is on an outdated app version.
+  /// Auto-dismisses after 6 seconds.
+  void _showVersionWarning(String studentName, String studentId, String version) {
+    showDialog(
+      context: context,
+      barrierDismissible: true,
+      builder: (ctx) {
+        // Auto-dismiss after 6 seconds
+        Future.delayed(const Duration(seconds: 6), () {
+          if (ctx.mounted) Navigator.of(ctx).pop();
+        });
+
+        return AlertDialog(
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+          backgroundColor: Colors.red.shade50,
+          title: Row(
+            children: [
+              Icon(Icons.warning_amber_rounded, color: Colors.red.shade700, size: 32),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Text(
+                  'App Update Required',
+                  style: TextStyle(
+                    color: Colors.red.shade800,
+                    fontWeight: FontWeight.bold,
+                    fontSize: 20,
+                  ),
+                ),
+              ),
+            ],
+          ),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.all(16),
+                decoration: BoxDecoration(
+                  color: Colors.white,
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(color: Colors.red.shade200),
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      studentName,
+                      style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+                    ),
+                    if (studentId.isNotEmpty) ...[
+                      const SizedBox(height: 4),
+                      Text(
+                        'ID: $studentId',
+                        style: TextStyle(fontSize: 14, color: Colors.grey.shade700),
+                      ),
+                    ],
+                    const SizedBox(height: 8),
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                      decoration: BoxDecoration(
+                        color: Colors.red.shade100,
+                        borderRadius: BorderRadius.circular(6),
+                      ),
+                      child: Text(
+                        'Current version: ${version.isEmpty ? "None (old app)" : version}',
+                        style: TextStyle(
+                          color: Colors.red.shade800,
+                          fontWeight: FontWeight.w600,
+                          fontSize: 13,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 16),
+              Row(
+                children: [
+                  Icon(Icons.info_outline, color: Colors.red.shade400, size: 20),
+                  const SizedBox(width: 8),
+                  const Expanded(
+                    child: Text(
+                      'This student is using an older version of the app.\nPlease ask them to update to v2 or later.',
+                      style: TextStyle(fontSize: 14, height: 1.5),
+                    ),
+                  ),
+                ],
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(ctx).pop(),
+              child: Text('OK', style: TextStyle(color: Colors.red.shade700, fontWeight: FontWeight.bold)),
+            ),
+          ],
+        );
+      },
+    );
   }
 
   // Left navigation pane
@@ -1069,6 +1201,42 @@ class _HomeScreenState extends State<HomeScreen> {
                 );
               },
             ),
+            const Divider(),
+            ListTile(
+              leading: Icon(Icons.logout, color: Colors.red.shade400),
+              title: Text('Sign Out', style: TextStyle(color: Colors.red.shade400)),
+              onTap: () async {
+                Navigator.of(context).pop(); // close drawer
+                final confirm = await showDialog<bool>(
+                  context: context,
+                  builder: (ctx) => AlertDialog(
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                    title: const Text('Sign Out'),
+                    content: const Text('Are you sure you want to sign out?'),
+                    actions: [
+                      TextButton(
+                        onPressed: () => Navigator.of(ctx).pop(false),
+                        child: const Text('Cancel'),
+                      ),
+                      ElevatedButton(
+                        onPressed: () => Navigator.of(ctx).pop(true),
+                        style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
+                        child: const Text('Sign Out', style: TextStyle(color: Colors.white)),
+                      ),
+                    ],
+                  ),
+                );
+                if (confirm == true && mounted) {
+                  await AuthService().signOut();
+                  if (mounted) {
+                    Navigator.of(context).pushAndRemoveUntil(
+                      MaterialPageRoute(builder: (_) => const LoginScreen()),
+                      (route) => false,
+                    );
+                  }
+                }
+              },
+            ),
           ],
         ),
       ),
@@ -1162,6 +1330,10 @@ class _HomeScreenState extends State<HomeScreen> {
                           MaterialPageRoute(
                             builder: (_) => DayScholarScreen(
                               applicationsListenable: _dayScholarManager.notifier,
+                              onTimeEdited: (rowIndex, field, formattedTime) {
+                                _dayScholarManager.setTimeManually(rowIndex, field, formattedTime);
+                                _log('[MANUAL TIME] Day Scholar row=$rowIndex $field=$formattedTime');
+                              },
                             ),
                           ),
                         ),
@@ -1179,6 +1351,10 @@ class _HomeScreenState extends State<HomeScreen> {
                           MaterialPageRoute(
                             builder: (_) => HostelScreen(
                               rowsListenable: _hostelManager.notifier,
+                              onTimeEdited: (rowIndex, field, formattedTime) {
+                                _hostelManager.setTimeManually(rowIndex, field, formattedTime);
+                                _log('[MANUAL TIME] Hostel row=$rowIndex $field=$formattedTime');
+                              },
                             ),
                           ),
                         ),
@@ -1202,6 +1378,10 @@ class _HomeScreenState extends State<HomeScreen> {
                           MaterialPageRoute(
                             builder: (_) => LeaveApplicationsScreen(
                               applicationsListenable: _leaveManager.notifier,
+                              onTimeEdited: (rowIndex, field, formattedTime) {
+                                _leaveManager.setTimeManually(rowIndex, field, formattedTime);
+                                _log('[MANUAL TIME] Leave row=$rowIndex $field=$formattedTime');
+                              },
                             ),
                           ),
                         ),

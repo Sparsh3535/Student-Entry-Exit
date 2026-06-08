@@ -225,4 +225,36 @@ class HostelManager {
     notifier.value = [];
     LocalStorageService().delete('hostel');
   }
+
+  /// Manually set a time field for a specific row.
+  /// Used when the security guard clicks an empty time cell and selects a time.
+  /// [rowIndex] — index in the _hostelRows list
+  /// [field] — 'intime' or 'outtime'
+  /// [formattedTime] — time string in "yyyy-MM-dd HH:mm:ss" format
+  void setTimeManually(int rowIndex, String field, String formattedTime) {
+    if (rowIndex < 0 || rowIndex >= _hostelRows.length) {
+      _log('[HOSTEL MANAGER] ⚠ Invalid row index: $rowIndex');
+      return;
+    }
+    final r = _hostelRows[rowIndex];
+    _log('[HOSTEL MANAGER] Manual time entry: row=$rowIndex, field=$field, time=$formattedTime');
+
+    r[field] = formattedTime;
+    _hostelRows[rowIndex] = Map<String, dynamic>.from(r);
+    notifier.value = List<Map<String, dynamic>>.from(_hostelRows);
+    _save();
+
+    _log('[HOSTEL MANAGER] ✓ Manual $field set to $formattedTime');
+
+    // Check if both times are now filled → trigger Firebase delete
+    final intime = (r['intime']?.toString() ?? '').trim();
+    final outtime = (r['outtime']?.toString() ?? '').trim();
+    if (intime.isNotEmpty && outtime.isNotEmpty) {
+      final docId = r['_docId']?.toString();
+      if (docId != null && docId.isNotEmpty) {
+        _log('[HOSTEL MANAGER] ✓ Both times filled after manual entry — triggering onEntryComplete');
+        onEntryComplete?.call(docId);
+      }
+    }
+  }
 }

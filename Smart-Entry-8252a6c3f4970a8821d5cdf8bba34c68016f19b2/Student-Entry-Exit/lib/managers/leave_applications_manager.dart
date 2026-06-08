@@ -368,4 +368,42 @@ class LeaveApplicationsManager {
       _save();
     }
   }
+
+  /// Manually set a time field for a specific row.
+  /// Used when the security guard clicks an empty time cell and selects a time.
+  /// [rowIndex] — index in the _leaveApps list
+  /// [field] — 'leaving' or 'returning'
+  /// [formattedTime] — time string in "yyyy-MM-dd HH:mm:ss" format
+  void setTimeManually(int rowIndex, String field, String formattedTime) {
+    if (rowIndex < 0 || rowIndex >= _leaveApps.length) {
+      _log('[LEAVE MANAGER] ⚠ Invalid row index: $rowIndex');
+      return;
+    }
+    final r = _leaveApps[rowIndex];
+    _log('[LEAVE MANAGER] Manual time entry: row=$rowIndex, field=$field, time=$formattedTime');
+
+    r[field] = formattedTime;
+
+    // If both leaving and returning are now filled, calculate duration
+    final leaving = (r['leaving']?.toString() ?? '').trim();
+    final returning = (r['returning']?.toString() ?? '').trim();
+    if (leaving.isNotEmpty && returning.isNotEmpty) {
+      r['duration'] = _calculateDuration(leaving, returning);
+    }
+
+    _leaveApps[rowIndex] = Map<String, dynamic>.from(r);
+    notifier.value = List<Map<String, dynamic>>.from(_leaveApps);
+    _save();
+
+    _log('[LEAVE MANAGER] ✓ Manual $field set to $formattedTime');
+
+    // Check if both times are now filled → trigger Firebase delete
+    if (leaving.isNotEmpty && returning.isNotEmpty) {
+      final docId = r['_docId']?.toString();
+      if (docId != null && docId.isNotEmpty) {
+        _log('[LEAVE MANAGER] ✓ Both times filled after manual entry — triggering onEntryComplete');
+        onEntryComplete?.call(docId);
+      }
+    }
+  }
 }

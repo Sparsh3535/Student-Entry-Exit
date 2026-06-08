@@ -4,7 +4,11 @@ import 'dart:math' as math;
 
 class DayScholarScreen extends StatefulWidget {
   final ValueListenable<List<Map<String, dynamic>>> applicationsListenable;
-  const DayScholarScreen({super.key, required this.applicationsListenable});
+  /// Callback when a security guard manually sets a time field.
+  /// Parameters: (rowIndex in the FULL unfiltered list, field name, formatted time string)
+  final void Function(int rowIndex, String field, String formattedTime)? onTimeEdited;
+
+  const DayScholarScreen({super.key, required this.applicationsListenable, this.onTimeEdited});
 
   @override
   State<DayScholarScreen> createState() => _DayScholarScreenState();
@@ -38,6 +42,22 @@ class _DayScholarScreenState extends State<DayScholarScreen> {
     final id = _cell(row, ['id', 'Id', 'roll', 'roll_no', 'rollno', 'Roll Number']).toLowerCase();
     final name = _cell(row, ['name', 'Name', 'fullName', 'fullname']).toLowerCase();
     return id.contains(q) || name.contains(q);
+  }
+
+  /// Show a time picker and return the selected time formatted as "yyyy-MM-dd HH:mm:ss"
+  Future<void> _pickTime(int originalIndex, String field) async {
+    final picked = await showTimePicker(
+      context: context,
+      initialTime: TimeOfDay.now(),
+      helpText: 'Select ${field == 'intime' ? 'In' : 'Out'} Time',
+    );
+    if (picked != null && widget.onTimeEdited != null) {
+      final now = DateTime.now();
+      final dt = DateTime(now.year, now.month, now.day, picked.hour, picked.minute, 0);
+      String two(int n) => n.toString().padLeft(2, '0');
+      final formatted = '${dt.year}-${two(dt.month)}-${two(dt.day)} ${two(dt.hour)}:${two(dt.minute)}:${two(dt.second)}';
+      widget.onTimeEdited!(originalIndex, field, formatted);
+    }
   }
 
   @override
@@ -83,16 +103,22 @@ class _DayScholarScreenState extends State<DayScholarScreen> {
                   child: ValueListenableBuilder<List<Map<String, dynamic>>>(
                     valueListenable: widget.applicationsListenable,
                     builder: (context, rows, _) {
-                      var filtered = rows.where(_matchesSearch).toList();
+                      // Build index map: filtered row -> original index in the full list
+                      final indexedRows = <MapEntry<int, Map<String, dynamic>>>[];
+                      for (var i = 0; i < rows.length; i++) {
+                        if (_matchesSearch(rows[i])) {
+                          indexedRows.add(MapEntry(i, rows[i]));
+                        }
+                      }
 
                       // After 9 PM: unfilled entries (missing outtime) go to top
                       if (DateTime.now().hour >= 21) {
-                        filtered.sort((a, b) {
-                          final aOut = _cell(a, ['outtime', 'out_time', 'outTime']).trim();
-                          final bOut = _cell(b, ['outtime', 'out_time', 'outTime']).trim();
+                        indexedRows.sort((a, b) {
+                          final aOut = _cell(a.value, ['outtime', 'out_time', 'outTime']).trim();
+                          final bOut = _cell(b.value, ['outtime', 'out_time', 'outTime']).trim();
                           final aFilled = aOut.isNotEmpty ? 1 : 0;
                           final bFilled = bOut.isNotEmpty ? 1 : 0;
-                          return aFilled.compareTo(bFilled); // unfilled (0) before filled (1)
+                          return aFilled.compareTo(bFilled);
                         });
                       }
                       if (rows.isEmpty) {
@@ -100,7 +126,7 @@ class _DayScholarScreenState extends State<DayScholarScreen> {
                           child: Text('No day scholar entries yet.'),
                         );
                       }
-                      if (filtered.isEmpty) {
+                      if (indexedRows.isEmpty) {
                         return const Center(
                           child: Text('No matching entries found.'),
                         );
@@ -137,7 +163,9 @@ class _DayScholarScreenState extends State<DayScholarScreen> {
                                     DataColumn(label: Text('Out Time', style: TextStyle(fontWeight: FontWeight.bold))),
                                     DataColumn(label: Text('Security', style: TextStyle(fontWeight: FontWeight.bold))),
                                   ],
-                                  rows: filtered.map((r) {
+                                  rows: indexedRows.map((entry) {
+                                    final originalIndex = entry.key;
+                                    final r = entry.value;
                                     final name = _cell(r, ['name', 'Name', 'fullName', 'fullname']);
                                     final id = _cell(r, ['id', 'Id', 'roll', 'roll_no', 'rollno', 'Roll Number']);
                                     final phone = _cell(r, ['phone', 'Phone', 'mobile', 'Phone Number']);
@@ -159,7 +187,9 @@ class _DayScholarScreenState extends State<DayScholarScreen> {
                                     }
 
                                     Widget intimeWidget() {
-                                      if (intime.isEmpty) return const SelectableText('');
+                                      if (intime.isEmpty) {
+                                        return const Text('\u2014', style: TextStyle(color: Colors.black38));
+                                      }
                                       return SelectableText(
                                         intime,
                                         style: const TextStyle(color: Color(0xFF2E7D32), fontWeight: FontWeight.w600, fontSize: 14),
@@ -168,7 +198,26 @@ class _DayScholarScreenState extends State<DayScholarScreen> {
 
                                     Widget outtimeWidget() {
                                       if (outtime.isEmpty) {
-                                        return const Text('\u2014', style: TextStyle(color: Colors.black45));
+                                        return InkWell(
+                                          onTap: () => _pickTime(originalIndex, 'outtime'),
+                                          borderRadius: BorderRadius.circular(6),
+                                          child: Container(
+                                            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                                            decoration: BoxDecoration(
+                                              border: Border.all(color: Colors.red.shade200, width: 1.5),
+                                              borderRadius: BorderRadius.circular(6),
+                                              color: Colors.red.shade50,
+                                            ),
+                                            child: Row(
+                                              mainAxisSize: MainAxisSize.min,
+                                              children: [
+                                                Icon(Icons.access_time, size: 16, color: Colors.red.shade400),
+                                                const SizedBox(width: 4),
+                                                Text('Set', style: TextStyle(color: Colors.red.shade600, fontSize: 13, fontWeight: FontWeight.w500)),
+                                              ],
+                                            ),
+                                          ),
+                                        );
                                       }
                                       return Text(
                                         outtime,

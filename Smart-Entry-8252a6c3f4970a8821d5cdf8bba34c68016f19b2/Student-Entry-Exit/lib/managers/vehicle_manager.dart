@@ -111,20 +111,32 @@ class VehicleManager {
     await _saveToStorage();
   }
 
-  /// Record OUT time, persist to disk, then delete the Firebase document.
+  /// Record OUT time, persist to disk, then delete the Firebase document
+  /// from `vehicle_request` (only if status is approved/active).
+  /// vehicle_history is never touched — kept for oversight.
   Future<void> markOut(String docId) async {
     final timeStr = _nowTime();
     _updateRowField(docId, 'outTime', timeStr);
     _log('[VEHICLE] ✓ OUT recorded for $docId: $timeStr');
     await _saveToStorage();
 
-    // Delete from Firebase immediately on OUT — row stays on screen until midnight
-    _log('[VEHICLE] 🗑 Deleting Firebase document: $docId');
-    try {
-      await FirebaseService().deleteVehicleHistoryDocument(docId);
-      _log('[VEHICLE] ✓ Firebase document deleted: $docId');
-    } catch (e) {
-      _log('[VEHICLE] ✗ Firebase delete failed for $docId: $e');
+    // Only delete approved/active entries from Firebase — rejected ones stay
+    final row = notifier.value.firstWhere(
+      (r) => r['_docId']?.toString() == docId,
+      orElse: () => <String, dynamic>{},
+    );
+    final status = (row['status']?.toString() ?? '').toLowerCase().trim();
+
+    if (status == 'rejected' || status == 'denied') {
+      _log('[VEHICLE] ⚠ Skipping Firebase delete — status is "$status" (must stay in vehicle_request)');
+    } else {
+      _log('[VEHICLE] 🗑 Deleting from vehicle_request: $docId');
+      try {
+        await FirebaseService().deleteVehicleRequestDocument(docId);
+        _log('[VEHICLE] ✓ vehicle_request document deleted: $docId');
+      } catch (e) {
+        _log('[VEHICLE] ✗ Firebase delete failed for $docId: $e');
+      }
     }
   }
 

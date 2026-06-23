@@ -221,15 +221,17 @@ class FirebaseService {
     }
   }
 
-  /// Fetch all documents from the `vehicle_requests` collection and return
+  /// Fetch all documents from the `vehicle_request` collection and return
   /// only those where `status` is NOT "pending".
   ///
-  /// This is called by VehicleManager on a polling schedule (1 min / 5 min).
+  /// This is called by VehicleManager on manual refresh.
+  /// Note: vehicle_history is kept intact for oversight — we only read/delete
+  /// from vehicle_request.
   Future<List<Map<String, dynamic>>> fetchAllVehicleRequests() async {
-    print('[Firebase Service] Fetching all vehicle_history...');
+    print('[Firebase Service] Fetching all vehicle_request...');
     try {
       final snapshot =
-          await _firestore.collection('vehicle_history').get();
+          await _firestore.collection('vehicle_request').get();
 
       final results = <Map<String, dynamic>>[];
       for (final doc in snapshot.docs) {
@@ -242,10 +244,10 @@ class FirebaseService {
         results.add(_normalizeVehicleRequestData(data, doc.id));
       }
 
-      print('[Firebase Service] ✓ vehicle_requests: ${snapshot.docs.length} total, ${results.length} non-pending');
+      print('[Firebase Service] ✓ vehicle_request: ${snapshot.docs.length} total, ${results.length} non-pending');
       return results;
     } catch (e) {
-      print('[Firebase Service] ✗ Error fetching vehicle_requests: $e');
+      print('[Firebase Service] ✗ Error fetching vehicle_request: $e');
       rethrow;
     }
   }
@@ -278,14 +280,15 @@ class FirebaseService {
     };
   }
 
-  /// Delete a document from `vehicle_history`.
-  /// Called by VehicleManager when both IN and OUT times are recorded.
-  Future<void> deleteVehicleHistoryDocument(String docId) async {
+  /// Delete a document from `vehicle_request`.
+  /// Called by VehicleManager when OUT time is recorded.
+  /// vehicle_history is never touched — kept for oversight.
+  Future<void> deleteVehicleRequestDocument(String docId) async {
     try {
-      await _firestore.collection('vehicle_history').doc(docId).delete();
-      print('[Firebase Service] ✓ Deleted vehicle_history/$docId');
+      await _firestore.collection('vehicle_request').doc(docId).delete();
+      print('[Firebase Service] ✓ Deleted vehicle_request/$docId');
     } catch (e) {
-      print('[Firebase Service] ✗ Error deleting vehicle_history/$docId: $e');
+      print('[Firebase Service] ✗ Error deleting vehicle_request/$docId: $e');
       rethrow;
     }
   }

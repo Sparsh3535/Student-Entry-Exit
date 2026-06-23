@@ -18,8 +18,8 @@ import 'day_scholar.dart';
 import 'leave_applications.dart';
 import 'hostel.dart';
 import 'vehicle_screen.dart';
-import 'login_screen.dart';
-import '../managers/auth_service.dart';
+import 'developers_space.dart';
+import '../managers/app_version_service.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -140,9 +140,11 @@ class _HomeScreenState extends State<HomeScreen> {
 
   /// Startup sequence: load CSV path → prompt if needed → then load data
   Future<void> _startupSequence() async {
-    // Step 0: Load saved security guard name
+    // Step 0: Load saved security guard name and app version
     await SecurityNameService().load();
     _log('[SECURITY] Guard name: ${SecurityNameService().name.isEmpty ? '(not set)' : SecurityNameService().name}');
+    await AppVersionService().load();
+    _log('[VERSION] Required app version: ${AppVersionService().isSet ? AppVersionService().requiredVersion : '(not set — all versions allowed)'}');
 
     // Step 1: Load saved CSV path
     await CsvService().loadSavedPath();
@@ -822,14 +824,14 @@ class _HomeScreenState extends State<HomeScreen> {
         _log('✓ FIREBASE FETCH SUCCESSFUL');
         _log('[DATA] Type: ${studentData['type']}, Name: ${studentData['name']}, ID: ${studentData['id']}');
 
-        // ── VERSION CHECK: Require v2+ ──────────────────────────────────
-        final version = (studentData['version']?.toString() ?? '').trim().toLowerCase();
+        // ── VERSION CHECK: Match against Developers Space setting ──────
+        final version = (studentData['version']?.toString() ?? '').trim();
+        final allowedVersions = AppVersionService().allowedVersions;
         _log('[VERSION] Student app version: "${version.isEmpty ? "(none)" : version}"');
+        _log('[VERSION] Allowed versions: ${allowedVersions.isEmpty ? "(none — all allowed)" : allowedVersions.join(", ")}');
 
-        // Accept v2, v3, v4, ... — reject empty, v1, or any non-v2+ value
-        final versionNum = _parseVersionNumber(version);
-        if (versionNum < 2) {
-          _log('[VERSION] ❌ BLOCKED — student is on outdated version ($version). v2+ required.');
+        if (!AppVersionService().isVersionAllowed(version)) {
+          _log('[VERSION] ❌ BLOCKED — student version ($version) is not in allowed list (${allowedVersions.join(", ")})');
           final studentName = studentData['name']?.toString() ?? 'Unknown';
           final studentId = studentData['id']?.toString() ?? '';
           // Show warning dialog (only for live scans and if context is available)
@@ -895,18 +897,12 @@ class _HomeScreenState extends State<HomeScreen> {
     }
   }
 
-  /// Parse a version string like "v2", "V3", "v10" → numeric part (2, 3, 10).
-  /// Returns 0 for empty, null, or unparseable strings.
-  int _parseVersionNumber(String version) {
-    if (version.isEmpty) return 0;
-    // Remove leading 'v' or 'V', then parse the number
-    final cleaned = version.replaceAll(RegExp(r'^[vV]'), '').trim();
-    return int.tryParse(cleaned) ?? 0;
-  }
-
-  /// Show a prominent warning dialog when a student is on an outdated app version.
+  /// Show a prominent warning dialog when a student's app version doesn't match.
   /// Auto-dismisses after 6 seconds.
   void _showVersionWarning(String studentName, String studentId, String version) {
+    final svc = AppVersionService();
+    final allowedVersions = svc.allowedVersions;
+    final allowedDisplay = allowedVersions.join(', ');
     showDialog(
       context: context,
       barrierDismissible: true,
@@ -969,9 +965,26 @@ class _HomeScreenState extends State<HomeScreen> {
                         borderRadius: BorderRadius.circular(6),
                       ),
                       child: Text(
-                        'Current version: ${version.isEmpty ? "None (old app)" : version}',
+                        'Student version: ${version.isEmpty ? "None (old app)" : version}',
                         style: TextStyle(
                           color: Colors.red.shade800,
+                          fontWeight: FontWeight.w600,
+                          fontSize: 13,
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                    Container(
+                      width: double.infinity,
+                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                      decoration: BoxDecoration(
+                        color: Colors.green.shade50,
+                        borderRadius: BorderRadius.circular(6),
+                      ),
+                      child: Text(
+                        'Allowed version(s): $allowedDisplay',
+                        style: TextStyle(
+                          color: Colors.green.shade800,
                           fontWeight: FontWeight.w600,
                           fontSize: 13,
                         ),
@@ -985,10 +998,10 @@ class _HomeScreenState extends State<HomeScreen> {
                 children: [
                   Icon(Icons.info_outline, color: Colors.red.shade400, size: 20),
                   const SizedBox(width: 8),
-                  const Expanded(
+                  Expanded(
                     child: Text(
-                      'This student is using an older version of the app.\nPlease ask them to update to v2 or later.',
-                      style: TextStyle(fontSize: 14, height: 1.5),
+                      'This student\'s app version does not match the allowed version(s) ($allowedDisplay).\nPlease ask them to update their app.',
+                      style: const TextStyle(fontSize: 14, height: 1.5),
                     ),
                   ),
                 ],
@@ -1060,6 +1073,16 @@ class _HomeScreenState extends State<HomeScreen> {
                       ),
                     ],
                   ),
+                );
+              },
+            ),
+            ListTile(
+              leading: const Icon(Icons.developer_mode),
+              title: const Text('Developers Space'),
+              onTap: () {
+                Navigator.of(context).pop();
+                Navigator.of(context).push(
+                  MaterialPageRoute(builder: (_) => const DevelopersSpaceScreen()),
                 );
               },
             ),
@@ -1201,42 +1224,7 @@ class _HomeScreenState extends State<HomeScreen> {
                 );
               },
             ),
-            const Divider(),
-            ListTile(
-              leading: Icon(Icons.logout, color: Colors.red.shade400),
-              title: Text('Sign Out', style: TextStyle(color: Colors.red.shade400)),
-              onTap: () async {
-                Navigator.of(context).pop(); // close drawer
-                final confirm = await showDialog<bool>(
-                  context: context,
-                  builder: (ctx) => AlertDialog(
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
-                    title: const Text('Sign Out'),
-                    content: const Text('Are you sure you want to sign out?'),
-                    actions: [
-                      TextButton(
-                        onPressed: () => Navigator.of(ctx).pop(false),
-                        child: const Text('Cancel'),
-                      ),
-                      ElevatedButton(
-                        onPressed: () => Navigator.of(ctx).pop(true),
-                        style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
-                        child: const Text('Sign Out', style: TextStyle(color: Colors.white)),
-                      ),
-                    ],
-                  ),
-                );
-                if (confirm == true && mounted) {
-                  await AuthService().signOut();
-                  if (mounted) {
-                    Navigator.of(context).pushAndRemoveUntil(
-                      MaterialPageRoute(builder: (_) => const LoginScreen()),
-                      (route) => false,
-                    );
-                  }
-                }
-              },
-            ),
+
           ],
         ),
       ),

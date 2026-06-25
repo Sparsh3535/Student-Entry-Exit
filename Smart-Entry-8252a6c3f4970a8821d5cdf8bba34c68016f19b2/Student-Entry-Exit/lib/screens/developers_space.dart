@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 import '../managers/app_version_service.dart';
+import '../managers/auth_email_service.dart';
+import '../managers/google_auth_service.dart';
 
 class DevelopersSpaceScreen extends StatefulWidget {
   const DevelopersSpaceScreen({super.key});
@@ -13,6 +15,7 @@ class _DevelopersSpaceScreenState extends State<DevelopersSpaceScreen>
   late TabController _tabController;
   final TextEditingController _singleController = TextEditingController();
   final TextEditingController _multiController = TextEditingController();
+  final TextEditingController _authEmailController = TextEditingController();
   bool _isSaving = false;
 
   @override
@@ -32,6 +35,7 @@ class _DevelopersSpaceScreenState extends State<DevelopersSpaceScreen>
     _tabController.dispose();
     _singleController.dispose();
     _multiController.dispose();
+    _authEmailController.dispose();
     super.dispose();
   }
 
@@ -248,6 +252,11 @@ class _DevelopersSpaceScreenState extends State<DevelopersSpaceScreen>
 
                 // Info box
                 _buildInfoBox(),
+
+                const SizedBox(height: 28),
+
+                // ── Authentication Email Change ──
+                _buildAuthEmailSection(),
               ],
             ),
           ),
@@ -657,6 +666,171 @@ class _DevelopersSpaceScreenState extends State<DevelopersSpaceScreen>
             ),
           ),
         ],
+      ),
+    );
+  }
+
+  // ── Authentication Email Change Section ──────────────────────────────
+  Widget _buildAuthEmailSection() {
+    final authSvc = AuthEmailService();
+    final currentEmail = authSvc.allowedEmail;
+
+    return Container(
+      width: double.infinity,
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(16),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.06),
+            blurRadius: 16,
+            offset: const Offset(0, 4),
+          ),
+        ],
+      ),
+      child: Padding(
+        padding: const EdgeInsets.all(28),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            // Header
+            Row(
+              children: [
+                Container(
+                  padding: const EdgeInsets.all(10),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFF0288D1).withOpacity(0.1),
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                  child: const Icon(Icons.admin_panel_settings,
+                      color: Color(0xFF0288D1), size: 24),
+                ),
+                const SizedBox(width: 14),
+                Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text(
+                      'Authentication Email',
+                      style: TextStyle(
+                        fontSize: 18,
+                        fontWeight: FontWeight.bold,
+                        color: Color(0xFF263238),
+                      ),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      'Change the authorized login email',
+                      style: TextStyle(
+                        fontSize: 13,
+                        color: Colors.grey.shade600,
+                      ),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+
+            const SizedBox(height: 20),
+
+            // Current email display
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+              decoration: BoxDecoration(
+                color: Colors.green.shade50,
+                borderRadius: BorderRadius.circular(10),
+                border: Border.all(color: Colors.green.shade200),
+              ),
+              child: Row(
+                children: [
+                  Icon(Icons.check_circle, color: Colors.green.shade600, size: 18),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: Text(
+                      'Current: $currentEmail',
+                      style: TextStyle(
+                        color: Colors.green.shade800,
+                        fontWeight: FontWeight.w600,
+                        fontSize: 13,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+
+            const SizedBox(height: 18),
+
+            // New email input
+            TextField(
+              controller: _authEmailController,
+              keyboardType: TextInputType.emailAddress,
+              decoration: InputDecoration(
+                labelText: 'New authorized email',
+                hintText: 'e.g. user@nitgoa.ac.in',
+                prefixIcon: const Icon(Icons.email_outlined, size: 20),
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                focusedBorder: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(12),
+                  borderSide: const BorderSide(color: Color(0xFF0288D1), width: 2),
+                ),
+              ),
+            ),
+
+            const SizedBox(height: 16),
+
+            // Save button
+            SizedBox(
+              width: double.infinity,
+              height: 46,
+              child: ElevatedButton.icon(
+                icon: const Icon(Icons.save_rounded, size: 20),
+                label: const Text(
+                  'Update Authentication Email',
+                  style: TextStyle(fontWeight: FontWeight.w600),
+                ),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: const Color(0xFF0288D1),
+                  foregroundColor: Colors.white,
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  elevation: 0,
+                ),
+                onPressed: () async {
+                  final newEmail = _authEmailController.text.trim();
+                  if (newEmail.isEmpty) {
+                    _showSnack('Please enter an email address', Colors.orange);
+                    return;
+                  }
+                  if (!RegExp(r'^[^@\s]+@[^@\s]+\.[^@\s]+$').hasMatch(newEmail)) {
+                    _showSnack('Please enter a valid email address', Colors.red);
+                    return;
+                  }
+                  await authSvc.setAllowedEmail(newEmail);
+                  _authEmailController.clear();
+                  setState(() {});
+                  _showSnack('✓ Auth email updated to: $newEmail', Colors.green);
+                },
+              ),
+            ),
+
+            const SizedBox(height: 12),
+
+            // Info text
+            Text(
+              'The user must sign in with this email to access the app. '
+              'After changing, the current session remains active until sign-out.',
+              style: TextStyle(
+                fontSize: 12,
+                color: Colors.grey.shade500,
+                height: 1.5,
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }

@@ -2,22 +2,24 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:qr_scanner_desktop/screens/home_screen.dart';
+import 'package:qr_scanner_desktop/screens/login_screen.dart';
 import 'package:qr_scanner_desktop/managers/app_directory.dart';
+import 'package:qr_scanner_desktop/managers/auth_email_service.dart';
+import 'package:qr_scanner_desktop/managers/google_auth_service.dart';
 import 'firebase_options.dart';
 
 void main() async {
+  // Ensure Widgets binding is initialized before any async work.
   WidgetsFlutterBinding.ensureInitialized();
 
-  // Catch all Flutter framework errors — prevent app crash in release mode
-  FlutterError.onError = (details) {
-    print('[FLUTTER ERROR] ${details.exception}');
-    print('[FLUTTER ERROR] ${details.stack}');
-    FlutterError.presentError(details);
-  };
-
-  // Initialize platform-aware data directory (must be first)
+  // Initialize the app's data directory.
   await AppDirectory.init();
 
+  // Load saved auth state and OAuth config.
+  await AuthEmailService().load();
+  await GoogleAuthService().load();
+
+  // Initialize Firebase only once.
   try {
     if (Firebase.apps.isEmpty) {
       await Firebase.initializeApp(
@@ -25,17 +27,17 @@ void main() async {
       );
     }
   } catch (e) {
-    print('[Firebase Init Error] $e');
-    // Continue even if Firebase fails - app can work offline
+    debugPrint('[Firebase Init Error] $e');
   }
 
-  // Catch ALL uncaught async errors — prevents app close in release mode
-  runZonedGuarded(() {
-    runApp(const MyApp());
-  }, (error, stack) {
-    print('[UNCAUGHT ERROR] $error');
-    print('[UNCAUGHT STACK] $stack');
-  });
+  // Global Flutter error handling (no separate zone).
+  FlutterError.onError = (FlutterErrorDetails details) {
+    debugPrint('[FLUTTER ERROR] ${details.exception}');
+    debugPrint('[FLUTTER STACK] ${details.stack}');
+    FlutterError.presentError(details);
+  };
+
+  runApp(const MyApp());
 }
 
 class MyApp extends StatelessWidget {
@@ -43,13 +45,16 @@ class MyApp extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final localLoggedIn = AuthEmailService().isLoggedIn;
+    final firebaseLoggedIn = GoogleAuthService().isSignedIn;
+    final isLoggedIn = localLoggedIn && firebaseLoggedIn;
     return MaterialApp(
       title: 'Security Portal',
-      debugShowCheckedModeBanner: false, // hide debug banner
+      debugShowCheckedModeBanner: false,
       theme: ThemeData.from(
         colorScheme: ColorScheme.fromSeed(seedColor: Colors.blue),
       ),
-      home: const HomeScreen(),
+      home: isLoggedIn ? const HomeScreen() : const LoginScreen(),
     );
   }
 }

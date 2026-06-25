@@ -145,8 +145,8 @@ class VehicleManager {
   void clear() {
     notifier.value = [];
     lastPollTimeNotifier.value = null;
-    _log('[VEHICLE] ✓ Cleared all rows for new day');
-    // LocalStorageService auto-clears on load next day (date check)
+    LocalStorageService().delete('vehicle');
+    _log('[VEHICLE] ✓ Cleared all rows and local storage for new day');
   }
 
   // ── Internals ─────────────────────────────────────────────────────────
@@ -154,7 +154,7 @@ class VehicleManager {
   String _nowTime() {
     final now = DateTime.now();
     String two(int n) => n.toString().padLeft(2, '0');
-    return '${two(now.hour)}:${two(now.minute)}';
+    return '${now.year}-${two(now.month)}-${two(now.day)} ${two(now.hour)}:${two(now.minute)}:${two(now.second)}';
   }
 
   void _updateRowField(String docId, String key, String value) {

@@ -19,7 +19,10 @@ import 'leave_applications.dart';
 import 'hostel.dart';
 import 'vehicle_screen.dart';
 import 'developers_space.dart';
+import 'login_screen.dart';
 import '../managers/app_version_service.dart';
+import '../managers/auth_email_service.dart';
+import '../managers/google_auth_service.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -1222,6 +1225,21 @@ class _HomeScreenState extends State<HomeScreen> {
                     ),
                   ],
                 );
+              },
+            ),
+            ListTile(
+              leading: Icon(Icons.logout, color: Colors.red.shade400),
+              title: Text('Sign Out', style: TextStyle(color: Colors.red.shade400)),
+              onTap: () async {
+                Navigator.of(context).pop();
+                await AuthEmailService().logout();
+                await GoogleAuthService().signOut();
+                if (mounted) {
+                  Navigator.of(context).pushAndRemoveUntil(
+                    MaterialPageRoute(builder: (_) => const LoginScreen()),
+                    (route) => false,
+                  );
+                }
               },
             ),
 

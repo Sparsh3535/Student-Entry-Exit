@@ -13,10 +13,9 @@ class DefaultFirebaseOptions {
     projectId: 'nit-goa-gate-system',
     messagingSenderId: '788131250494',
     appId: '1:788131250494:web:d21d8ff23ad4624be06c6f',
-    // Leave these empty for desktop only - they're for web/mobile
-    authDomain: '',
-    databaseURL: '',
-    storageBucket: '',
+    authDomain: 'nit-goa-gate-system.firebaseapp.com',
+    databaseURL: 'https://nit-goa-gate-system.firebasedatabase.app',
+    storageBucket: 'nit-goa-gate-system.appspot.com',
   );
 
   static const FirebaseOptions android = FirebaseOptions(

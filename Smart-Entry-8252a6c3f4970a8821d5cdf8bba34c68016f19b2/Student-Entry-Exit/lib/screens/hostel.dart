@@ -114,11 +114,13 @@ class _HostelScreenState extends State<HostelScreen> {
                       // After 9 PM: students who haven't returned yet (intime empty) float to top
                       if (DateTime.now().hour >= 21) {
                         indexedRows.sort((a, b) {
+                          // In hostel flow: outtime = student leaving, intime = student returning
+                          // Float students who are OUT (intime empty) to the top
                           final aIn = _cell(a.value, ['intime', 'in_time', 'inTime']).trim();
                           final bIn = _cell(b.value, ['intime', 'in_time', 'inTime']).trim();
                           final aFilled = aIn.isNotEmpty ? 1 : 0;
                           final bFilled = bIn.isNotEmpty ? 1 : 0;
-                          return aFilled.compareTo(bFilled);
+                          return aFilled.compareTo(bFilled); // empty intime (still out) floats to top
                         });
                       }
                       if (rows.isEmpty) {
@@ -186,6 +188,7 @@ class _HostelScreenState extends State<HostelScreen> {
 
                                     Widget outtimeWidget() {
                                       if (outtime.isEmpty) {
+                                        // outtime is auto-set when student scans QR to leave — not manually editable
                                         return const Text('\u2014', style: TextStyle(color: Colors.black38));
                                       }
                                       return Text(

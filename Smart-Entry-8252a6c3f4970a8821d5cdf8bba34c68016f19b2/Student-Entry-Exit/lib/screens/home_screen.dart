@@ -18,9 +18,8 @@ import 'day_scholar.dart';
 import 'leave_applications.dart';
 import 'hostel.dart';
 import 'vehicle_screen.dart';
-import 'developers_space.dart';
 import 'login_screen.dart';
-import '../managers/app_version_service.dart';
+import 'developers_space.dart';
 import '../managers/auth_email_service.dart';
 import '../managers/google_auth_service.dart';
 
@@ -52,7 +51,8 @@ class _HomeScreenState extends State<HomeScreen> {
   Timer? _midnightTimer; // auto-reset at midnight
   Timer? _connectivityTimer; // periodic internet check
   String _currentDate = ''; // track current date for midnight detection
-  bool _csvExportedForCurrentDate = false; // tracks if 11:30 PM CSV export succeeded
+  bool _csvExportedForCurrentDate =
+      false; // tracks if 11:30 PM CSV export succeeded
   bool _isOnline = true; // internet connectivity status
   bool _showOnlineBanner = false; // briefly show green banner when back online
 
@@ -105,7 +105,9 @@ class _HomeScreenState extends State<HomeScreen> {
     _scannerFocusNode.addListener(() {
       if (!_scannerFocusNode.hasFocus && mounted) {
         Future.delayed(const Duration(milliseconds: 100), () {
-          if (mounted && !_scannerFocusNode.hasFocus && !_isOtherTextFieldFocused()) {
+          if (mounted &&
+              !_scannerFocusNode.hasFocus &&
+              !_isOtherTextFieldFocused()) {
             _scannerFocusNode.requestFocus();
           }
         });
@@ -114,7 +116,9 @@ class _HomeScreenState extends State<HomeScreen> {
 
     // Periodic safety net: check every second and re-focus if needed
     _scannerFocusTimer = Timer.periodic(const Duration(seconds: 1), (_) {
-      if (mounted && !_scannerFocusNode.hasFocus && !_isOtherTextFieldFocused()) {
+      if (mounted &&
+          !_scannerFocusNode.hasFocus &&
+          !_isOtherTextFieldFocused()) {
         _scannerFocusNode.requestFocus();
       }
     });
@@ -143,11 +147,11 @@ class _HomeScreenState extends State<HomeScreen> {
 
   /// Startup sequence: load CSV path → prompt if needed → then load data
   Future<void> _startupSequence() async {
-    // Step 0: Load saved security guard name and app version
+    // Step 0: Load saved security guard name
     await SecurityNameService().load();
-    _log('[SECURITY] Guard name: ${SecurityNameService().name.isEmpty ? '(not set)' : SecurityNameService().name}');
-    await AppVersionService().load();
-    _log('[VERSION] Required app version: ${AppVersionService().isSet ? AppVersionService().requiredVersion : '(not set — all versions allowed)'}');
+    _log(
+      '[SECURITY] Guard name: ${SecurityNameService().name.isEmpty ? '(not set)' : SecurityNameService().name}',
+    );
 
     // Step 1: Load saved CSV path
     await CsvService().loadSavedPath();
@@ -184,11 +188,17 @@ class _HomeScreenState extends State<HomeScreen> {
     // We delay 5 seconds to give Firebase time to fully initialize before
     // attempting Firestore fetches.
     if (_scanQueueService.isNotEmpty) {
-      _log('[QUEUE] ⚡ Found ${_scanQueueService.length} queued scan(s) from a previous session');
-      _log('[QUEUE] ⏳ Scheduling startup drain in 5 seconds (waiting for Firebase to settle)...');
+      _log(
+        '[QUEUE] ⚡ Found ${_scanQueueService.length} queued scan(s) from a previous session',
+      );
+      _log(
+        '[QUEUE] ⏳ Scheduling startup drain in 5 seconds (waiting for Firebase to settle)...',
+      );
       Future.delayed(const Duration(seconds: 5), () {
         if (mounted && _scanQueueService.isNotEmpty && !_isDrainingQueue) {
-          _log('[QUEUE] 🔄 Startup drain triggered — processing scans from previous session');
+          _log(
+            '[QUEUE] 🔄 Startup drain triggered — processing scans from previous session',
+          );
           _drainScanQueue();
         }
       });
@@ -225,8 +235,9 @@ class _HomeScreenState extends State<HomeScreen> {
 
   Future<void> _checkConnectivity() async {
     try {
-      final result = await InternetAddress.lookup('google.com')
-          .timeout(const Duration(seconds: 5));
+      final result = await InternetAddress.lookup(
+        'google.com',
+      ).timeout(const Duration(seconds: 5));
       final online = result.isNotEmpty && result[0].rawAddress.isNotEmpty;
 
       if (mounted) {
@@ -278,21 +289,27 @@ class _HomeScreenState extends State<HomeScreen> {
     // Track docIds we've already successfully fetched from Firebase in this
     // drain session. For repeated docIds, we can reuse the cached data
     // instead of hitting Firebase again (the doc may have been deleted).
-    final Map<String, Map<String, dynamic>> _fetchedDataCache = {};
+    final Map<String, Map<String, dynamic>> fetchedDataCache = {};
 
     int processed = 0;
     while (_scanQueueService.isNotEmpty) {
       // Check connectivity before each retry
       try {
-        final result = await InternetAddress.lookup('google.com')
-            .timeout(const Duration(seconds: 5));
-        final stillOnline = result.isNotEmpty && result[0].rawAddress.isNotEmpty;
+        final result = await InternetAddress.lookup(
+          'google.com',
+        ).timeout(const Duration(seconds: 5));
+        final stillOnline =
+            result.isNotEmpty && result[0].rawAddress.isNotEmpty;
         if (!stillOnline) {
-          _log('[QUEUE] ⚠ Lost internet mid-drain — stopping. ${_scanQueueService.length} scan(s) remain queued.');
+          _log(
+            '[QUEUE] ⚠ Lost internet mid-drain — stopping. ${_scanQueueService.length} scan(s) remain queued.',
+          );
           break;
         }
       } catch (_) {
-        _log('[QUEUE] ⚠ Lost internet mid-drain — stopping. ${_scanQueueService.length} scan(s) remain queued.');
+        _log(
+          '[QUEUE] ⚠ Lost internet mid-drain — stopping. ${_scanQueueService.length} scan(s) remain queued.',
+        );
         break;
       }
 
@@ -301,16 +318,22 @@ class _HomeScreenState extends State<HomeScreen> {
       if (entry == null) break;
 
       processed++;
-      _log('[QUEUE] ↩ Processing queued scan $processed/$total: ${entry.docId} (was queued at: ${entry.enqueuedAt})');
+      _log(
+        '[QUEUE] ↩ Processing queued scan $processed/$total: ${entry.docId} (was queued at: ${entry.enqueuedAt})',
+      );
 
       bool success;
 
       // Check if we already have cached data for this docId (from a
       // previous entry in this same drain session). If so, reuse it —
       // the Firebase doc may have been deleted by onEntryComplete.
-      if (_fetchedDataCache.containsKey(entry.docId)) {
-        _log('[QUEUE] ♻ Reusing cached data for ${entry.docId} (already fetched in this drain session)');
-        final cachedData = Map<String, dynamic>.from(_fetchedDataCache[entry.docId]!);
+      if (fetchedDataCache.containsKey(entry.docId)) {
+        _log(
+          '[QUEUE] ♻ Reusing cached data for ${entry.docId} (already fetched in this drain session)',
+        );
+        final cachedData = Map<String, dynamic>.from(
+          fetchedDataCache[entry.docId]!,
+        );
         cachedData['_docId'] = entry.docId;
         cachedData['_scanTime'] = entry.enqueuedAt;
         _log('[QUEUE] ⏱ Using queued scan time: ${entry.enqueuedAt}');
@@ -318,7 +341,10 @@ class _HomeScreenState extends State<HomeScreen> {
         success = true;
       } else {
         // First time seeing this docId — fetch from Firebase
-        success = await _fetchAndProcessFromFirebase(entry.docId, scanTime: entry.enqueuedAt);
+        success = await _fetchAndProcessFromFirebase(
+          entry.docId,
+          scanTime: entry.enqueuedAt,
+        );
 
         // If successful, cache the fetched data for potential reuse
         if (success) {
@@ -327,7 +353,7 @@ class _HomeScreenState extends State<HomeScreen> {
           try {
             final data = await _firebaseService.fetchByDocumentId(entry.docId);
             if (data != null) {
-              _fetchedDataCache[entry.docId] = data;
+              fetchedDataCache[entry.docId] = data;
             }
           } catch (_) {
             // Non-critical — if the doc was already deleted by onEntryComplete,
@@ -335,10 +361,12 @@ class _HomeScreenState extends State<HomeScreen> {
           }
 
           // Fallback: build cache from local rows if Firebase fetch failed
-          if (!_fetchedDataCache.containsKey(entry.docId)) {
+          if (!fetchedDataCache.containsKey(entry.docId)) {
             final localRow = _findLocalRowByDocId(entry.docId);
             if (localRow != null) {
-              _fetchedDataCache[entry.docId] = Map<String, dynamic>.from(localRow);
+              fetchedDataCache[entry.docId] = Map<String, dynamic>.from(
+                localRow,
+              );
               _log('[QUEUE] 📋 Cached local row data for ${entry.docId}');
             }
           }
@@ -350,16 +378,22 @@ class _HomeScreenState extends State<HomeScreen> {
         await _scanQueueService.dequeue();
       } else {
         // Processing failed — leave the entry in the queue for next retry
-        _log('[QUEUE] ⚠ Processing failed for ${entry.docId} — leaving in queue for retry');
+        _log(
+          '[QUEUE] ⚠ Processing failed for ${entry.docId} — leaving in queue for retry',
+        );
         await _scanQueueService.incrementHeadAttempts();
         break; // stop drain, will retry on next connectivity check
       }
     }
 
     if (_scanQueueService.isEmpty) {
-      _log('[QUEUE] ✅ Queue fully drained — all $processed scan(s) processed successfully');
+      _log(
+        '[QUEUE] ✅ Queue fully drained — all $processed scan(s) processed successfully',
+      );
     } else {
-      _log('[QUEUE] ℹ Queue drain stopped — ${_scanQueueService.length} scan(s) still pending (will retry when internet is stable)');
+      _log(
+        '[QUEUE] ℹ Queue drain stopped — ${_scanQueueService.length} scan(s) still pending (will retry when internet is stable)',
+      );
     }
 
     _isDrainingQueue = false;
@@ -396,12 +430,17 @@ class _HomeScreenState extends State<HomeScreen> {
       final today = '${now.year}-${two(now.month)}-${two(now.day)}';
 
       // ── Phase 1: 11:30 PM — Export CSV (retry every 30s until midnight) ──
-      if (now.hour == 23 && now.minute >= 30 && !_csvExportedForCurrentDate && today == _currentDate) {
+      if (now.hour == 23 &&
+          now.minute >= 30 &&
+          !_csvExportedForCurrentDate &&
+          today == _currentDate) {
         _log('[PRE-MIDNIGHT] 11:30 PM window — exporting CSV backup...');
         final success = await _exportAllCsv(_currentDate);
         if (success) {
           _csvExportedForCurrentDate = true;
-          _log('[PRE-MIDNIGHT] ✓ All CSV exports successful — safe to clear at midnight');
+          _log(
+            '[PRE-MIDNIGHT] ✓ All CSV exports successful — safe to clear at midnight',
+          );
         } else {
           _log('[PRE-MIDNIGHT] ⚠ CSV export failed — will retry in 30s');
         }
@@ -414,9 +453,13 @@ class _HomeScreenState extends State<HomeScreen> {
 
         // Last-chance CSV export if 11:30 PM export never succeeded
         if (!_csvExportedForCurrentDate) {
-          _log('[MIDNIGHT] ⚠ CSV was NOT exported during 11:30 PM window — attempting final export...');
+          _log(
+            '[MIDNIGHT] ⚠ CSV was NOT exported during 11:30 PM window — attempting final export...',
+          );
           final success = await _exportAllCsv(yesterday);
-          _log('[MIDNIGHT] Final export: ${success ? "✓ SUCCESS" : "✗ FAILED — data may be lost"}');
+          _log(
+            '[MIDNIGHT] Final export: ${success ? "✓ SUCCESS" : "✗ FAILED — data may be lost"}',
+          );
         }
 
         _csvExportedForCurrentDate = false; // reset flag for new day
@@ -428,7 +471,9 @@ class _HomeScreenState extends State<HomeScreen> {
         // Leave: only clear completed entries — incomplete ones survive midnight
         _leaveManager.clearCompleted();
 
-        _log('[MIDNIGHT RESET] ✓ Day scholar, hostel & vehicle cleared, leave completed entries cleared for new day ($today)');
+        _log(
+          '[MIDNIGHT RESET] ✓ Day scholar, hostel & vehicle cleared, leave completed entries cleared for new day ($today)',
+        );
       }
     });
   }
@@ -452,7 +497,9 @@ class _HomeScreenState extends State<HomeScreen> {
         columns: CsvService.dayScholarColumns,
       );
       if (path == null) allSucceeded = false;
-      _log('[CSV EXPORT] Day Scholar (${_dayScholarManager.rows.length} rows): ${path ?? "FAILED"}');
+      _log(
+        '[CSV EXPORT] Day Scholar (${_dayScholarManager.rows.length} rows): ${path ?? "FAILED"}',
+      );
     }
 
     // Hostel
@@ -464,7 +511,9 @@ class _HomeScreenState extends State<HomeScreen> {
         columns: CsvService.hostelColumns,
       );
       if (path == null) allSucceeded = false;
-      _log('[CSV EXPORT] Hostel (${_hostelManager.rows.length} rows): ${path ?? "FAILED"}');
+      _log(
+        '[CSV EXPORT] Hostel (${_hostelManager.rows.length} rows): ${path ?? "FAILED"}',
+      );
     }
 
     // Leave
@@ -476,7 +525,9 @@ class _HomeScreenState extends State<HomeScreen> {
         columns: CsvService.leaveColumns,
       );
       if (path == null) allSucceeded = false;
-      _log('[CSV EXPORT] Leave (${_leaveManager.rows.length} rows): ${path ?? "FAILED"}');
+      _log(
+        '[CSV EXPORT] Leave (${_leaveManager.rows.length} rows): ${path ?? "FAILED"}',
+      );
     }
 
     // Vehicle
@@ -488,7 +539,9 @@ class _HomeScreenState extends State<HomeScreen> {
         columns: CsvService.vehicleColumns,
       );
       if (path == null) allSucceeded = false;
-      _log('[CSV EXPORT] Vehicle (${_vehicleManager.rows.length} rows): ${path ?? "FAILED"}');
+      _log(
+        '[CSV EXPORT] Vehicle (${_vehicleManager.rows.length} rows): ${path ?? "FAILED"}',
+      );
     }
 
     return allSucceeded;
@@ -555,9 +608,9 @@ class _HomeScreenState extends State<HomeScreen> {
                 Text(
                   isAndroid
                       ? 'Choose a folder on your device where attendance CSV files will be saved.\n'
-                        'Subfolders (day_scholar, hostel, leave_application) will be created automatically.'
+                            'Subfolders (day_scholar, hostel, leave_application) will be created automatically.'
                       : 'Enter the folder path where attendance CSV files will be saved.\n'
-                        'Subfolders (day_scholar, hostel, leave_application) will be created automatically.',
+                            'Subfolders (day_scholar, hostel, leave_application) will be created automatically.',
                   style: const TextStyle(color: Colors.grey, fontSize: 13),
                 ),
                 const SizedBox(height: 16),
@@ -573,7 +626,11 @@ class _HomeScreenState extends State<HomeScreen> {
                       ),
                       child: Row(
                         children: [
-                          const Icon(Icons.check_circle, color: Colors.green, size: 20),
+                          const Icon(
+                            Icons.check_circle,
+                            color: Colors.green,
+                            size: 20,
+                          ),
                           const SizedBox(width: 8),
                           Expanded(
                             child: Text(
@@ -589,22 +646,35 @@ class _HomeScreenState extends State<HomeScreen> {
                   if (errorText != null)
                     Padding(
                       padding: const EdgeInsets.only(top: 8),
-                      child: Text(errorText!, style: TextStyle(color: Colors.red.shade700, fontSize: 13)),
+                      child: Text(
+                        errorText!,
+                        style: TextStyle(
+                          color: Colors.red.shade700,
+                          fontSize: 13,
+                        ),
+                      ),
                     ),
                   const SizedBox(height: 12),
                   SizedBox(
                     width: double.infinity,
                     child: ElevatedButton.icon(
                       icon: const Icon(Icons.folder_open),
-                      label: Text(pathController.text.isEmpty ? 'Browse Folder' : 'Change Folder'),
+                      label: Text(
+                        pathController.text.isEmpty
+                            ? 'Browse Folder'
+                            : 'Change Folder',
+                      ),
                       style: ElevatedButton.styleFrom(
                         backgroundColor: Colors.deepPurple,
                         foregroundColor: Colors.white,
                         padding: const EdgeInsets.symmetric(vertical: 14),
-                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(8),
+                        ),
                       ),
                       onPressed: () async {
-                        final result = await FilePicker.platform.getDirectoryPath();
+                        final result = await FilePicker.platform
+                            .getDirectoryPath();
                         if (result != null) {
                           setDialogState(() {
                             pathController.text = result;
@@ -702,7 +772,9 @@ class _HomeScreenState extends State<HomeScreen> {
     try {
       final trimmed = value.trim();
       if (trimmed.isNotEmpty) {
-        _log('[SCANNER] Received scan input (${trimmed.length} chars): ${trimmed.length > 200 ? '${trimmed.substring(0, 200)}...' : trimmed}');
+        _log(
+          '[SCANNER] Received scan input (${trimmed.length} chars): ${trimmed.length > 200 ? '${trimmed.substring(0, 200)}...' : trimmed}',
+        );
         _processBufferLine(trimmed);
       }
       _scannerController.clear();
@@ -802,7 +874,10 @@ class _HomeScreenState extends State<HomeScreen> {
   /// [scanTime] — optional. When processing a queued scan, this is the
   /// timestamp from when the student ACTUALLY scanned (enqueuedAt), not now.
   /// If null, the current time is used (normal live scan behaviour).
-  Future<bool> _fetchAndProcessFromFirebase(String docId, {String? scanTime}) async {
+  Future<bool> _fetchAndProcessFromFirebase(
+    String docId, {
+    String? scanTime,
+  }) async {
     try {
       final totalSw = Stopwatch()..start();
       _log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
@@ -825,16 +900,24 @@ class _HomeScreenState extends State<HomeScreen> {
 
       if (studentData != null) {
         _log('✓ FIREBASE FETCH SUCCESSFUL');
-        _log('[DATA] Type: ${studentData['type']}, Name: ${studentData['name']}, ID: ${studentData['id']}');
+        _log(
+          '[DATA] Type: ${studentData['type']}, Name: ${studentData['name']}, ID: ${studentData['id']}',
+        );
 
-        // ── VERSION CHECK: Match against Developers Space setting ──────
-        final version = (studentData['version']?.toString() ?? '').trim();
-        final allowedVersions = AppVersionService().allowedVersions;
-        _log('[VERSION] Student app version: "${version.isEmpty ? "(none)" : version}"');
-        _log('[VERSION] Allowed versions: ${allowedVersions.isEmpty ? "(none — all allowed)" : allowedVersions.join(", ")}');
+        // ── VERSION CHECK: Require v2+ ──────────────────────────────────
+        final version = (studentData['version']?.toString() ?? '')
+            .trim()
+            .toLowerCase();
+        _log(
+          '[VERSION] Student app version: "${version.isEmpty ? "(none)" : version}"',
+        );
 
-        if (!AppVersionService().isVersionAllowed(version)) {
-          _log('[VERSION] ❌ BLOCKED — student version ($version) is not in allowed list (${allowedVersions.join(", ")})');
+        // Accept v2, v3, v4, ... — reject empty, v1, or any non-v2+ value
+        final versionNum = _parseVersionNumber(version);
+        if (versionNum < 2) {
+          _log(
+            '[VERSION] ❌ BLOCKED — student is on outdated version ($version). v2+ required.',
+          );
           final studentName = studentData['name']?.toString() ?? 'Unknown';
           final studentId = studentData['id']?.toString() ?? '';
           // Show warning dialog (only for live scans and if context is available)
@@ -859,7 +942,9 @@ class _HomeScreenState extends State<HomeScreen> {
         final routeSw = Stopwatch()..start();
         _qrAuthenticator.processMap(studentData);
         routeSw.stop();
-        _log('[TIMING] QR routing + manager processing took: ${routeSw.elapsedMilliseconds}ms');
+        _log(
+          '[TIMING] QR routing + manager processing took: ${routeSw.elapsedMilliseconds}ms',
+        );
 
         totalSw.stop();
         _log('[TIMING] ✓ Total pipeline: ${totalSw.elapsedMilliseconds}ms');
@@ -868,7 +953,9 @@ class _HomeScreenState extends State<HomeScreen> {
         _log('');
         _log('✗✗✗ FIREBASE FETCH RETURNED NULL ✗✗✗');
         _log('✗ No student found in Firebase for docId: $docId');
-        _log('  This may be a transient issue (stale connectivity, cache miss)');
+        _log(
+          '  This may be a transient issue (stale connectivity, cache miss)',
+        );
         // Queue for retry during live scans — the doc may become available
         // once true connectivity is restored. During queue drain, the drain
         // loop handles retries by leaving the entry at the head.
@@ -900,12 +987,22 @@ class _HomeScreenState extends State<HomeScreen> {
     }
   }
 
-  /// Show a prominent warning dialog when a student's app version doesn't match.
+  /// Parse a version string like "v2", "V3", "v10" → numeric part (2, 3, 10).
+  /// Returns 0 for empty, null, or unparseable strings.
+  int _parseVersionNumber(String version) {
+    if (version.isEmpty) return 0;
+    // Remove leading 'v' or 'V', then parse the number
+    final cleaned = version.replaceAll(RegExp(r'^[vV]'), '').trim();
+    return int.tryParse(cleaned) ?? 0;
+  }
+
+  /// Show a prominent warning dialog when a student is on an outdated app version.
   /// Auto-dismisses after 6 seconds.
-  void _showVersionWarning(String studentName, String studentId, String version) {
-    final svc = AppVersionService();
-    final allowedVersions = svc.allowedVersions;
-    final allowedDisplay = allowedVersions.join(', ');
+  void _showVersionWarning(
+    String studentName,
+    String studentId,
+    String version,
+  ) {
     showDialog(
       context: context,
       barrierDismissible: true,
@@ -916,11 +1013,17 @@ class _HomeScreenState extends State<HomeScreen> {
         });
 
         return AlertDialog(
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(16),
+          ),
           backgroundColor: Colors.red.shade50,
           title: Row(
             children: [
-              Icon(Icons.warning_amber_rounded, color: Colors.red.shade700, size: 32),
+              Icon(
+                Icons.warning_amber_rounded,
+                color: Colors.red.shade700,
+                size: 32,
+              ),
               const SizedBox(width: 12),
               Expanded(
                 child: Text(
@@ -951,43 +1054,35 @@ class _HomeScreenState extends State<HomeScreen> {
                   children: [
                     Text(
                       studentName,
-                      style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+                      style: const TextStyle(
+                        fontSize: 18,
+                        fontWeight: FontWeight.bold,
+                      ),
                     ),
                     if (studentId.isNotEmpty) ...[
                       const SizedBox(height: 4),
                       Text(
                         'ID: $studentId',
-                        style: TextStyle(fontSize: 14, color: Colors.grey.shade700),
+                        style: TextStyle(
+                          fontSize: 14,
+                          color: Colors.grey.shade700,
+                        ),
                       ),
                     ],
                     const SizedBox(height: 8),
                     Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 10,
+                        vertical: 4,
+                      ),
                       decoration: BoxDecoration(
                         color: Colors.red.shade100,
                         borderRadius: BorderRadius.circular(6),
                       ),
                       child: Text(
-                        'Student version: ${version.isEmpty ? "None (old app)" : version}',
+                        'Current version: ${version.isEmpty ? "None (old app)" : version}',
                         style: TextStyle(
                           color: Colors.red.shade800,
-                          fontWeight: FontWeight.w600,
-                          fontSize: 13,
-                        ),
-                      ),
-                    ),
-                    const SizedBox(height: 12),
-                    Container(
-                      width: double.infinity,
-                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                      decoration: BoxDecoration(
-                        color: Colors.green.shade50,
-                        borderRadius: BorderRadius.circular(6),
-                      ),
-                      child: Text(
-                        'Allowed version(s): $allowedDisplay',
-                        style: TextStyle(
-                          color: Colors.green.shade800,
                           fontWeight: FontWeight.w600,
                           fontSize: 13,
                         ),
@@ -999,12 +1094,16 @@ class _HomeScreenState extends State<HomeScreen> {
               const SizedBox(height: 16),
               Row(
                 children: [
-                  Icon(Icons.info_outline, color: Colors.red.shade400, size: 20),
+                  Icon(
+                    Icons.info_outline,
+                    color: Colors.red.shade400,
+                    size: 20,
+                  ),
                   const SizedBox(width: 8),
-                  Expanded(
+                  const Expanded(
                     child: Text(
-                      'This student\'s app version does not match the allowed version(s) ($allowedDisplay).\nPlease ask them to update their app.',
-                      style: const TextStyle(fontSize: 14, height: 1.5),
+                      'This student is using an older version of the app.\nPlease ask them to update to v2 or later.',
+                      style: TextStyle(fontSize: 14, height: 1.5),
                     ),
                   ),
                 ],
@@ -1014,7 +1113,13 @@ class _HomeScreenState extends State<HomeScreen> {
           actions: [
             TextButton(
               onPressed: () => Navigator.of(ctx).pop(),
-              child: Text('OK', style: TextStyle(color: Colors.red.shade700, fontWeight: FontWeight.bold)),
+              child: Text(
+                'OK',
+                style: TextStyle(
+                  color: Colors.red.shade700,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
             ),
           ],
         );
@@ -1049,7 +1154,9 @@ class _HomeScreenState extends State<HomeScreen> {
               onTap: () {
                 Navigator.of(context).pop();
                 // show editable dialog to set security name (persisted to disk)
-                final ctl = TextEditingController(text: SecurityNameService().name);
+                final ctl = TextEditingController(
+                  text: SecurityNameService().name,
+                );
                 showDialog(
                   context: context,
                   builder: (ctx) => AlertDialog(
@@ -1227,22 +1334,53 @@ class _HomeScreenState extends State<HomeScreen> {
                 );
               },
             ),
+            const Divider(),
             ListTile(
               leading: Icon(Icons.logout, color: Colors.red.shade400),
-              title: Text('Sign Out', style: TextStyle(color: Colors.red.shade400)),
+              title: Text(
+                'Sign Out',
+                style: TextStyle(color: Colors.red.shade400),
+              ),
               onTap: () async {
-                Navigator.of(context).pop();
-                await AuthEmailService().logout();
-                await GoogleAuthService().signOut();
-                if (mounted) {
-                  Navigator.of(context).pushAndRemoveUntil(
-                    MaterialPageRoute(builder: (_) => const LoginScreen()),
-                    (route) => false,
-                  );
+                Navigator.of(context).pop(); // close drawer
+                final confirm = await showDialog<bool>(
+                  context: context,
+                  builder: (ctx) => AlertDialog(
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(14),
+                    ),
+                    title: const Text('Sign Out'),
+                    content: const Text('Are you sure you want to sign out?'),
+                    actions: [
+                      TextButton(
+                        onPressed: () => Navigator.of(ctx).pop(false),
+                        child: const Text('Cancel'),
+                      ),
+                      ElevatedButton(
+                        onPressed: () => Navigator.of(ctx).pop(true),
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: Colors.red,
+                        ),
+                        child: const Text(
+                          'Sign Out',
+                          style: TextStyle(color: Colors.white),
+                        ),
+                      ),
+                    ],
+                  ),
+                );
+                if (confirm == true && mounted) {
+                  await AuthEmailService().logout();
+                  await GoogleAuthService().signOut();
+                  if (mounted) {
+                    Navigator.of(context).pushAndRemoveUntil(
+                      MaterialPageRoute(builder: (_) => const LoginScreen()),
+                      (route) => false,
+                    );
+                  }
                 }
               },
             ),
-
           ],
         ),
       ),
@@ -1335,10 +1473,17 @@ class _HomeScreenState extends State<HomeScreen> {
                         onTap: () => Navigator.of(context).push(
                           MaterialPageRoute(
                             builder: (_) => DayScholarScreen(
-                              applicationsListenable: _dayScholarManager.notifier,
+                              applicationsListenable:
+                                  _dayScholarManager.notifier,
                               onTimeEdited: (rowIndex, field, formattedTime) {
-                                _dayScholarManager.setTimeManually(rowIndex, field, formattedTime);
-                                _log('[MANUAL TIME] Day Scholar row=$rowIndex $field=$formattedTime');
+                                _dayScholarManager.setTimeManually(
+                                  rowIndex,
+                                  field,
+                                  formattedTime,
+                                );
+                                _log(
+                                  '[MANUAL TIME] Day Scholar row=$rowIndex $field=$formattedTime',
+                                );
                               },
                             ),
                           ),
@@ -1358,8 +1503,14 @@ class _HomeScreenState extends State<HomeScreen> {
                             builder: (_) => HostelScreen(
                               rowsListenable: _hostelManager.notifier,
                               onTimeEdited: (rowIndex, field, formattedTime) {
-                                _hostelManager.setTimeManually(rowIndex, field, formattedTime);
-                                _log('[MANUAL TIME] Hostel row=$rowIndex $field=$formattedTime');
+                                _hostelManager.setTimeManually(
+                                  rowIndex,
+                                  field,
+                                  formattedTime,
+                                );
+                                _log(
+                                  '[MANUAL TIME] Hostel row=$rowIndex $field=$formattedTime',
+                                );
                               },
                             ),
                           ),
@@ -1385,8 +1536,14 @@ class _HomeScreenState extends State<HomeScreen> {
                             builder: (_) => LeaveApplicationsScreen(
                               applicationsListenable: _leaveManager.notifier,
                               onTimeEdited: (rowIndex, field, formattedTime) {
-                                _leaveManager.setTimeManually(rowIndex, field, formattedTime);
-                                _log('[MANUAL TIME] Leave row=$rowIndex $field=$formattedTime');
+                                _leaveManager.setTimeManually(
+                                  rowIndex,
+                                  field,
+                                  formattedTime,
+                                );
+                                _log(
+                                  '[MANUAL TIME] Leave row=$rowIndex $field=$formattedTime',
+                                );
                               },
                             ),
                           ),
@@ -1403,9 +1560,8 @@ class _HomeScreenState extends State<HomeScreen> {
                         count: '${_vehicleManager.rows.length} Vehicles',
                         onTap: () => Navigator.of(context).push(
                           MaterialPageRoute(
-                            builder: (_) => VehicleScreen(
-                              manager: _vehicleManager,
-                            ),
+                            builder: (_) =>
+                                VehicleScreen(manager: _vehicleManager),
                           ),
                         ),
                       ),
@@ -1457,7 +1613,10 @@ class _HomeScreenState extends State<HomeScreen> {
             if (!_isOnline)
               Container(
                 width: double.infinity,
-                padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 16),
+                padding: const EdgeInsets.symmetric(
+                  vertical: 10,
+                  horizontal: 16,
+                ),
                 color: Colors.red.shade700,
                 child: Row(
                   children: [
@@ -1468,7 +1627,11 @@ class _HomeScreenState extends State<HomeScreen> {
                         _scanQueueService.isNotEmpty
                             ? '⚠ No Internet — ${_scanQueueService.length} scan(s) queued and will be processed automatically when connection is restored.'
                             : '⚠ No Internet Connection — Firebase sync is paused. Scanned entries will be queued and processed when connection is restored.',
-                        style: const TextStyle(color: Colors.white, fontSize: 13, fontWeight: FontWeight.w500),
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 13,
+                          fontWeight: FontWeight.w500,
+                        ),
                       ),
                     ),
                   ],
@@ -1477,7 +1640,10 @@ class _HomeScreenState extends State<HomeScreen> {
             if (_showOnlineBanner && _isOnline)
               Container(
                 width: double.infinity,
-                padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 16),
+                padding: const EdgeInsets.symmetric(
+                  vertical: 8,
+                  horizontal: 16,
+                ),
                 color: Colors.green.shade600,
                 child: Row(
                   children: [
@@ -1485,7 +1651,11 @@ class _HomeScreenState extends State<HomeScreen> {
                     const SizedBox(width: 10),
                     const Text(
                       '✓ Internet Connection Restored',
-                      style: TextStyle(color: Colors.white, fontSize: 13, fontWeight: FontWeight.w500),
+                      style: TextStyle(
+                        color: Colors.white,
+                        fontSize: 13,
+                        fontWeight: FontWeight.w500,
+                      ),
                     ),
                   ],
                 ),
@@ -1529,7 +1699,9 @@ class _HomeScreenState extends State<HomeScreen> {
                     const SizedBox(width: 12),
                     Expanded(
                       child: Text(
-                        SecurityNameService().name.isEmpty ? '(not set)' : SecurityNameService().name,
+                        SecurityNameService().name.isEmpty
+                            ? '(not set)'
+                            : SecurityNameService().name,
                         style: const TextStyle(
                           fontSize: 14,
                           color: Colors.black87,
@@ -1545,8 +1717,6 @@ class _HomeScreenState extends State<HomeScreen> {
       ),
     );
   }
-
-
 }
 
 /// Reusable premium dashboard card used by _buildMainContent().
@@ -1579,10 +1749,7 @@ class _DashboardCard extends StatelessWidget {
           decoration: BoxDecoration(
             borderRadius: BorderRadius.circular(12),
             gradient: LinearGradient(
-              colors: [
-                iconColor.withOpacity(0.08),
-                Colors.white,
-              ],
+              colors: [iconColor.withOpacity(0.08), Colors.white],
               begin: Alignment.topLeft,
               end: Alignment.bottomRight,
             ),

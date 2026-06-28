@@ -221,21 +221,18 @@ class FirebaseService {
     }
   }
 
-  /// Fetch all documents from the `vehicle_request` collection and return
+  /// Fetch all documents from the `vehicle_requests` collection and return
   /// only those where `status` is NOT "pending".
   ///
-  /// This is called by VehicleManager on manual refresh.
-  /// Note: vehicle_history is kept intact for oversight — we only read/delete
-  /// from vehicle_request.
+  /// This is called by VehicleManager on a polling schedule (1 min / 5 min).
   Future<List<Map<String, dynamic>>> fetchAllVehicleRequests() async {
-    print('[Firebase Service] Fetching all vehicle_request...');
+    print('[Firebase Service] Fetching all vehicle_history...');
     try {
-      final snapshot =
-          await _firestore.collection('vehicle_request').get();
+      final snapshot = await _firestore.collection('vehicle_history').get();
 
       final results = <Map<String, dynamic>>[];
       for (final doc in snapshot.docs) {
-        final data = doc.data() as Map<String, dynamic>;
+        final data = doc.data();
         final status = (data['status']?.toString() ?? '').toLowerCase().trim();
 
         // Only show approved/active entries — skip pending, rejected, denied, etc.
@@ -244,10 +241,12 @@ class FirebaseService {
         results.add(_normalizeVehicleRequestData(data, doc.id));
       }
 
-      print('[Firebase Service] ✓ vehicle_request: ${snapshot.docs.length} total, ${results.length} non-pending');
+      print(
+        '[Firebase Service] ✓ vehicle_requests: ${snapshot.docs.length} total, ${results.length} non-pending',
+      );
       return results;
     } catch (e) {
-      print('[Firebase Service] ✗ Error fetching vehicle_request: $e');
+      print('[Firebase Service] ✗ Error fetching vehicle_requests: $e');
       rethrow;
     }
   }
@@ -259,7 +258,9 @@ class FirebaseService {
   ///   rollNumber, name, phone, vehicleNumber, vehicleType,
   ///   visitDate, visitorName, visitorPhone
   Map<String, dynamic> _normalizeVehicleRequestData(
-      Map<String, dynamic> data, String docId) {
+    Map<String, dynamic> data,
+    String docId,
+  ) {
     return {
       '_docId': docId,
       'rollNumber': data['rollNumber']?.toString() ?? '',
@@ -278,6 +279,18 @@ class FirebaseService {
       'relationship': data['relationship']?.toString() ?? '',
       'numberOfMembers': data['numberOfMembers']?.toString() ?? '',
     };
+  }
+
+  /// Delete a document from `vehicle_history`.
+  /// Called by VehicleManager when both IN and OUT times are recorded.
+  Future<void> deleteVehicleHistoryDocument(String docId) async {
+    try {
+      await _firestore.collection('vehicle_history').doc(docId).delete();
+      print('[Firebase Service] ✓ Deleted vehicle_history/$docId');
+    } catch (e) {
+      print('[Firebase Service] ✗ Error deleting vehicle_history/$docId: $e');
+      rethrow;
+    }
   }
 
   /// Delete a document from `vehicle_request`.
@@ -333,10 +346,20 @@ class FirebaseService {
       'location': location,
       'security': null,
       // Vehicle-specific fields (populated when type = 'vehicle')
-      'vehicleNumber': data['vehicleNumber']?.toString() ?? data['vehicle_number']?.toString() ?? data['registrationNumber']?.toString() ?? '',
-      'vehicleType': data['vehicleType']?.toString() ?? data['vehicle_type']?.toString() ?? data['typeOfVehicle']?.toString() ?? data['type_of_vehicle']?.toString() ?? '',
+      'vehicleNumber':
+          data['vehicleNumber']?.toString() ??
+          data['vehicle_number']?.toString() ??
+          data['registrationNumber']?.toString() ??
+          '',
+      'vehicleType':
+          data['vehicleType']?.toString() ??
+          data['vehicle_type']?.toString() ??
+          data['typeOfVehicle']?.toString() ??
+          data['type_of_vehicle']?.toString() ??
+          '',
       // App version — used to check if student's app is up to date
-      'version': data['version']?.toString() ?? data['appVersion']?.toString() ?? '',
+      'version':
+          data['version']?.toString() ?? data['appVersion']?.toString() ?? '',
     };
   }
 
@@ -447,14 +470,20 @@ class FirebaseService {
     final String returnTime = data['returnTime']?.toString() ?? '';
 
     // Extension handling: if extended=true, use extensionNewReturnDate
-    final bool isExtended = data['extended'] == true ||
+    final bool isExtended =
+        data['extended'] == true ||
         data['extended']?.toString().toLowerCase() == 'true';
-    final String extensionStatus = data['extensionStatus']?.toString().toLowerCase() ?? '';
+    final String extensionStatus =
+        data['extensionStatus']?.toString().toLowerCase() ?? '';
 
     if (isExtended && extensionStatus == 'approved') {
-      final String extReturnDate = _formatTimestampToDate(data['extensionNewReturnDate']);
+      final String extReturnDate = _formatTimestampToDate(
+        data['extensionNewReturnDate'],
+      );
       if (extReturnDate.isNotEmpty) {
-        print('[LEAVE NORMALIZE] Extension approved — using extensionNewReturnDate: $extReturnDate (was: $returnDate)');
+        print(
+          '[LEAVE NORMALIZE] Extension approved — using extensionNewReturnDate: $extReturnDate (was: $returnDate)',
+        );
         returnDate = extReturnDate;
       }
     }
@@ -484,7 +513,8 @@ class FirebaseService {
       'extended': isExtended && extensionStatus == 'approved',
       'security': null,
       // App version — used to check if student's app is up to date
-      'version': data['version']?.toString() ?? data['appVersion']?.toString() ?? '',
+      'version':
+          data['version']?.toString() ?? data['appVersion']?.toString() ?? '',
     };
   }
 

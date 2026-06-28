@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 import '../managers/app_version_service.dart';
 import '../managers/auth_email_service.dart';
-import '../managers/google_auth_service.dart';
 
 class DevelopersSpaceScreen extends StatefulWidget {
   const DevelopersSpaceScreen({super.key});

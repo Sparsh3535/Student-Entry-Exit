@@ -74,7 +74,7 @@ class _LoginScreenState extends State<LoginScreen>
       _isError = false;
     });
 
-    final user = await googleAuth.signInWithGoogle(
+    final email = await googleAuth.signInWithGoogle(
       onStatusUpdate: (status) {
         if (mounted) {
           setState(() => _statusMessage = status);
@@ -84,7 +84,7 @@ class _LoginScreenState extends State<LoginScreen>
 
     if (!mounted) return;
 
-    if (user == null) {
+    if (email == null || email.isEmpty) {
       setState(() {
         _isLoading = false;
         _isError = true;
@@ -94,7 +94,6 @@ class _LoginScreenState extends State<LoginScreen>
     }
 
     // Check if this email is allowed
-    final email = user.email ?? '';
     final authSvc = AuthEmailService();
     if (!authSvc.isAllowedEmail(email)) {
       setState(() {
@@ -118,7 +117,8 @@ class _LoginScreenState extends State<LoginScreen>
   }
 
   void _showSetupDialog() {
-    final clientIdCtl = TextEditingController();
+    final googleAuth = GoogleAuthService();
+    final clientIdCtl = TextEditingController(text: googleAuth.clientId);
     final clientSecretCtl = TextEditingController();
 
     showDialog(
@@ -469,25 +469,25 @@ class _LoginScreenState extends State<LoginScreen>
                                 ),
                               ),
 
-                              // Setup link if needed
-                              if (_needsSetup) ...[
-                                const SizedBox(height: 16),
-                                TextButton.icon(
-                                  onPressed: _showSetupDialog,
-                                  icon: Icon(
-                                    Icons.settings,
-                                    size: 16,
+                              // Setup / reconfigure link (always visible)
+                              const SizedBox(height: 16),
+                              TextButton.icon(
+                                onPressed: _showSetupDialog,
+                                icon: Icon(
+                                  _needsSetup ? Icons.settings : Icons.refresh,
+                                  size: 16,
+                                  color: Colors.amber.shade300,
+                                ),
+                                label: Text(
+                                  _needsSetup
+                                      ? 'Configure Google OAuth'
+                                      : 'Reconfigure Google OAuth',
+                                  style: TextStyle(
                                     color: Colors.amber.shade300,
-                                  ),
-                                  label: Text(
-                                    'Configure Google OAuth',
-                                    style: TextStyle(
-                                      color: Colors.amber.shade300,
-                                      fontSize: 13,
-                                    ),
+                                    fontSize: 13,
                                   ),
                                 ),
-                              ],
+                              ),
                             ],
                           ),
                         ),

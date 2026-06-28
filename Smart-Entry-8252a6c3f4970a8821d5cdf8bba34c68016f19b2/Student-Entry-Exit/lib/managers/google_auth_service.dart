@@ -2,7 +2,6 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 import 'package:flutter/foundation.dart';
-import 'package:firebase_auth/firebase_auth.dart';
 import 'package:http/http.dart' as http;
 import 'app_directory.dart';
 
@@ -14,7 +13,11 @@ import 'app_directory.dart';
 /// 3. User signs in with Google
 /// 4. Google redirects to our local server with an auth code
 /// 5. Exchange the auth code for tokens
-/// 6. Sign in with Firebase Auth using the Google credential
+/// 6. Decode the id_token JWT to get the user's email
+///
+/// Note: We do NOT use Firebase Auth's signInWithCredential because
+/// desktop OAuth Client IDs are not recognized by Firebase Auth.
+/// Instead we verify identity directly from Google's JWT token.
 class GoogleAuthService {
   static final GoogleAuthService _instance = GoogleAuthService._();
   factory GoogleAuthService() => _instance;
@@ -22,6 +25,7 @@ class GoogleAuthService {
 
   String _clientId = '';
   String _clientSecret = '';
+  String _signedInEmail = '';
 
   /// Config file for OAuth credentials
   File get _configFile {
@@ -34,27 +38,49 @@ class GoogleAuthService {
 
   String get clientId => _clientId;
 
-  /// Load saved OAuth credentials
+  /// Whether a user is currently signed in
+  bool get isSignedIn => _signedInEmail.isNotEmpty;
+
+  /// The currently signed-in email
+  String get currentEmail => _signedInEmail;
+
+  /// Load saved OAuth credentials and sign-in state
   Future<void> load() async {
     try {
       final file = _configFile;
       if (await file.exists()) {
         final content = await file.readAsString();
         final config = jsonDecode(content) as Map<String, dynamic>;
-        _clientId = (config['clientId'] as String?) ?? '';
-        _clientSecret = (config['clientSecret'] as String?) ?? '';
+        _clientId = _sanitize((config['clientId'] as String?) ?? '');
+        _clientSecret = _sanitize((config['clientSecret'] as String?) ?? '');
+        _signedInEmail = (config['signedInEmail'] as String?) ?? '';
         debugPrint(
-            '[GoogleAuthService] Loaded OAuth config, clientId=${_clientId.isNotEmpty ? "SET" : "EMPTY"}');
+            '[GoogleAuthService] Loaded config, clientId=${_clientId.isNotEmpty ? "SET" : "EMPTY"}, email=${_signedInEmail.isNotEmpty ? _signedInEmail : "NONE"}');
       }
     } catch (e) {
       debugPrint('[GoogleAuthService] Error loading config: $e');
     }
   }
 
+  /// Strip all whitespace, newlines, carriage returns from a credential string.
+  /// Users often paste with hidden \r\n from multi-line copy.
+  String _sanitize(String value) {
+    return value
+        .replaceAll('\r', '')
+        .replaceAll('\n', '')
+        .replaceAll(' ', '')
+        .replaceAll('\t', '');
+  }
+
   /// Save OAuth credentials
   Future<void> saveCredentials(String clientId, String clientSecret) async {
-    _clientId = clientId.trim();
-    _clientSecret = clientSecret.trim();
+    _clientId = _sanitize(clientId);
+    _clientSecret = _sanitize(clientSecret);
+    await _persistConfig();
+  }
+
+  /// Persist config to disk
+  Future<void> _persistConfig() async {
     try {
       final file = _configFile;
       final dir = file.parent;
@@ -64,17 +90,18 @@ class GoogleAuthService {
       await file.writeAsString(jsonEncode({
         'clientId': _clientId,
         'clientSecret': _clientSecret,
+        'signedInEmail': _signedInEmail,
       }));
-      debugPrint('[GoogleAuthService] ✓ OAuth credentials saved');
+      debugPrint('[GoogleAuthService] ✓ Config saved');
     } catch (e) {
       debugPrint('[GoogleAuthService] Error saving config: $e');
     }
   }
 
   /// Sign in with Google using the browser OAuth flow.
-  /// Returns the signed-in User, or null on failure.
+  /// Returns the signed-in email, or null on failure.
   /// [onStatusUpdate] is called with status messages for the UI.
-  Future<User?> signInWithGoogle({
+  Future<String?> signInWithGoogle({
     void Function(String status)? onStatusUpdate,
   }) async {
     if (_clientId.isEmpty) {
@@ -109,7 +136,7 @@ class GoogleAuthService {
       debugPrint('[GoogleAuthService] Browser opened for OAuth');
       onStatusUpdate?.call('Waiting for Google sign-in...');
 
-      // Step 4: Wait for the redirect (with timeout)
+      // Step 4: Wait for the redirect
       String? authCode;
       String? error;
 
@@ -152,49 +179,53 @@ class GoogleAuthService {
           'code': authCode,
           'client_id': _clientId,
           'client_secret': _clientSecret,
-          'redirect_uri': 'http://localhost:${port}',
+          'redirect_uri': 'http://localhost:$port',
           'grant_type': 'authorization_code',
         },
       );
 
       if (tokenResponse.statusCode != 200) {
         debugPrint(
-            '[GoogleAuthService] Token exchange failed: ${tokenResponse.body}');
-        onStatusUpdate?.call('Token exchange failed');
+            '[GoogleAuthService] Token exchange failed (${tokenResponse.statusCode}): ${tokenResponse.body}');
+        String errorMsg = 'Token exchange failed';
+        try {
+          final errData =
+              jsonDecode(tokenResponse.body) as Map<String, dynamic>;
+          errorMsg =
+              'Token error: ${errData['error_description'] ?? errData['error'] ?? 'unknown'}';
+        } catch (_) {}
+        onStatusUpdate?.call(errorMsg);
         return null;
       }
 
       final tokenData =
           jsonDecode(tokenResponse.body) as Map<String, dynamic>;
       final idToken = tokenData['id_token'] as String?;
-      final accessToken = tokenData['access_token'] as String?;
 
-      if (idToken == null || accessToken == null) {
-        debugPrint('[GoogleAuthService] Missing tokens in response');
+      if (idToken == null) {
+        debugPrint('[GoogleAuthService] Missing id_token in response');
         onStatusUpdate?.call('Invalid token response');
         return null;
       }
 
       debugPrint('[GoogleAuthService] ✓ Got tokens');
-      onStatusUpdate?.call('Signing in with Firebase...');
 
-      // Step 6: Sign in with Firebase Auth
-      final credential = GoogleAuthProvider.credential(
-        idToken: idToken,
-        accessToken: accessToken,
-      );
-
-      final userCredential =
-          await FirebaseAuth.instance.signInWithCredential(credential);
-      final user = userCredential.user;
-
-      if (user != null) {
-        debugPrint(
-            '[GoogleAuthService] ✓ Firebase sign-in success: ${user.email}');
-        onStatusUpdate?.call('Signed in as ${user.email}');
+      // Step 6: Decode the JWT id_token to get the user's email
+      // JWT format: header.payload.signature — we only need the payload
+      final email = _extractEmailFromJwt(idToken);
+      if (email == null || email.isEmpty) {
+        debugPrint('[GoogleAuthService] Could not extract email from id_token');
+        onStatusUpdate?.call('Could not read email from Google token');
+        return null;
       }
 
-      return user;
+      // Save signed-in state
+      _signedInEmail = email;
+      await _persistConfig();
+
+      debugPrint('[GoogleAuthService] ✓ Sign-in success: $email');
+      onStatusUpdate?.call('Signed in as $email');
+      return email;
     } catch (e) {
       debugPrint('[GoogleAuthService] Error during sign-in: $e');
       onStatusUpdate?.call('Sign-in error: $e');
@@ -206,21 +237,40 @@ class GoogleAuthService {
     }
   }
 
-  /// Sign out from Firebase Auth
-  Future<void> signOut() async {
+  /// Decode a JWT id_token and extract the email claim.
+  /// JWT = base64(header).base64(payload).signature
+  String? _extractEmailFromJwt(String jwt) {
     try {
-      await FirebaseAuth.instance.signOut();
-      debugPrint('[GoogleAuthService] ✓ Signed out');
+      final parts = jwt.split('.');
+      if (parts.length != 3) return null;
+
+      // Decode the payload (second part)
+      String payload = parts[1];
+      // Add padding if needed (base64 requires length divisible by 4)
+      switch (payload.length % 4) {
+        case 2:
+          payload += '==';
+          break;
+        case 3:
+          payload += '=';
+          break;
+      }
+      final decoded = utf8.decode(base64Url.decode(payload));
+      final claims = jsonDecode(decoded) as Map<String, dynamic>;
+      debugPrint('[GoogleAuthService] JWT claims: email=${claims['email']}, name=${claims['name']}');
+      return claims['email'] as String?;
     } catch (e) {
-      debugPrint('[GoogleAuthService] Error signing out: $e');
+      debugPrint('[GoogleAuthService] Error decoding JWT: $e');
+      return null;
     }
   }
 
-  /// Get the currently signed-in Firebase user
-  User? get currentUser => FirebaseAuth.instance.currentUser;
-
-  /// Whether a user is currently signed in with Firebase
-  bool get isSignedIn => FirebaseAuth.instance.currentUser != null;
+  /// Sign out — clear local state
+  Future<void> signOut() async {
+    _signedInEmail = '';
+    await _persistConfig();
+    debugPrint('[GoogleAuthService] ✓ Signed out');
+  }
 
   /// Build an HTML page to show in the browser after auth
   String _buildSuccessHtml(bool isError) {

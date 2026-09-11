@@ -130,20 +130,36 @@ class _LeaveApplicationsScreenState extends State<LeaveApplicationsScreen> {
     return id.contains(q) || name.contains(q);
   }
 
-  /// Show a time picker and return the selected time formatted as "yyyy-MM-dd HH:mm:ss"
-  Future<void> _pickTime(int originalIndex, String field) async {
-    final picked = await showTimePicker(
+  /// Show a date picker then time picker, saving as "dd-MM-yyyy hh:mm AM/PM"
+  Future<void> _pickDateTime(int originalIndex, String field) async {
+    final now = DateTime.now();
+
+    // Step 1: Pick date
+    final pickedDate = await showDatePicker(
+      context: context,
+      initialDate: now,
+      firstDate: DateTime(now.year - 1),
+      lastDate: DateTime(now.year + 1),
+      helpText: 'Select ${field == 'leaving' ? 'Leaving' : 'Returning'} Date',
+    );
+    if (pickedDate == null || !mounted) return;
+
+    // Step 2: Pick time
+    final pickedTime = await showTimePicker(
       context: context,
       initialTime: TimeOfDay.now(),
       helpText: 'Select ${field == 'leaving' ? 'Leaving' : 'Returning'} Time',
     );
-    if (picked != null && widget.onTimeEdited != null) {
-      final now = DateTime.now();
-      final dt = DateTime(now.year, now.month, now.day, picked.hour, picked.minute, 0);
-      String two(int n) => n.toString().padLeft(2, '0');
-      final formatted = '${dt.year}-${two(dt.month)}-${two(dt.day)} ${two(dt.hour)}:${two(dt.minute)}:${two(dt.second)}';
-      widget.onTimeEdited!(originalIndex, field, formatted);
-    }
+    if (pickedTime == null || widget.onTimeEdited == null) return;
+
+    // Format as "dd-MM-yyyy hh:mm AM/PM"
+    String two(int n) => n.toString().padLeft(2, '0');
+    final hour12 = pickedTime.hour == 0 ? 12 : (pickedTime.hour > 12 ? pickedTime.hour - 12 : pickedTime.hour);
+    final minute = two(pickedTime.minute);
+    final ampm = pickedTime.hour >= 12 ? 'PM' : 'AM';
+    final formatted = '${two(pickedDate.day)}-${two(pickedDate.month)}-${pickedDate.year} $hour12:$minute $ampm';
+
+    widget.onTimeEdited!(originalIndex, field, formatted);
   }
 
   /// Show a small popup with granted dates when a row is tapped
@@ -403,7 +419,7 @@ class _LeaveApplicationsScreenState extends State<LeaveApplicationsScreen> {
                                       Widget returningWidget() {
                                         if (returning.isEmpty) {
                                           return InkWell(
-                                            onTap: () => _pickTime(originalIndex, 'returning'),
+                                            onTap: () => _pickDateTime(originalIndex, 'returning'),
                                             borderRadius: BorderRadius.circular(6),
                                             child: Container(
                                               padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),

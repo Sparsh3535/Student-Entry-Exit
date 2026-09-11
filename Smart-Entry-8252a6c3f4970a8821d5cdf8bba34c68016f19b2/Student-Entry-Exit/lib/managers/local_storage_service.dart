@@ -156,6 +156,20 @@ class LocalStorageService {
     }
   }
 
+  /// Return the raw JSON payload (including the 'date' field) without any clearing.
+  /// Returns null if the file doesn't exist.
+  Future<Map<String, dynamic>?> getRawPayload(String key) async {
+    try {
+      final file = File('${_dataDir.path}${Platform.pathSeparator}$key.json');
+      if (!await file.exists()) return null;
+      final content = await file.readAsString();
+      return jsonDecode(content) as Map<String, dynamic>;
+    } catch (e) {
+      debugPrint('[LocalStorage] Error reading raw payload for "$key": $e');
+      return null;
+    }
+  }
+
   /// Delete saved data for a given key
   Future<void> delete(String key) async {
     try {

@@ -176,9 +176,12 @@ class DayScholarManager {
     final queued = fields['_scanTime']?.toString() ?? '';
     if (queued.isNotEmpty) {
       _log('[DAY SCHOLAR MANAGER] ⏱ Using queued scan time: $queued');
+      // Parse queued ISO time and convert to time-only format
+      final parsed = DateTime.tryParse(queued);
+      if (parsed != null) return shortTimeOnly(parsed);
       return queued;
     }
-    return shortDateTime(DateTime.now());
+    return shortTimeOnly(DateTime.now());
   }
 
   /// Helper method for logging
@@ -239,4 +242,59 @@ class DayScholarManager {
       }
     }
   }
+
+  /// Clears all incomplete entries (missing outtime).
+  /// Used during database refresh to replace local state with database state.
+  void clearIncomplete() {
+    final before = _dayRows.length;
+    _dayRows.removeWhere((row) => (row['outtime']?.toString() ?? '').trim().isEmpty);
+    if (_dayRows.length != before) {
+      notifier.value = List<Map<String, dynamic>>.from(_dayRows);
+      _save();
+      _log('[DAY SCHOLAR MANAGER] Cleared ${before - _dayRows.length} incomplete entries for refresh.');
+    }
+  }
+
+  /// Add a row from a database refresh (Refresh from Database button).
+  /// Only adds if a row with the same _docId or same student id does NOT
+  /// already exist on screen. This prevents duplicates when refreshing.
+  /// Returns true if the row was added, false if skipped (duplicate).
+  bool addFromRefresh(Map<String, dynamic> fields) {
+    final incomingDocId = fields['_docId']?.toString() ?? '';
+    final incomingId = fields['id']?.toString() ?? '';
+
+    // Check for duplicate by _docId
+    if (incomingDocId.isNotEmpty) {
+      for (final row in _dayRows) {
+        if (row['_docId']?.toString() == incomingDocId) {
+          _log('[DAY SCHOLAR MANAGER] ⏭ Refresh skip: _docId $incomingDocId already on screen');
+          return false;
+        }
+      }
+    }
+
+    // Check for duplicate by student id (only incomplete rows — completed ones are fine to add again)
+    if (incomingId.isNotEmpty) {
+      for (final row in _dayRows) {
+        final rowId = row['id']?.toString() ?? '';
+        final outtime = (row['outtime']?.toString() ?? '').trim();
+        if (rowId == incomingId && outtime.isEmpty) {
+          _log('[DAY SCHOLAR MANAGER] ⏭ Refresh skip: id $incomingId already has incomplete row');
+          return false;
+        }
+      }
+    }
+
+    // Add new row with intime placeholder from createdAt, outtime empty
+    final normalized = Map<String, dynamic>.from(fields);
+    normalized['intime'] = normalized['intime'] ?? shortTimeOnly(DateTime.now());
+    normalized['outtime'] = null;
+    normalized['security'] = SecurityNameService().name;
+    _dayRows.add(normalized);
+    notifier.value = List<Map<String, dynamic>>.from(_dayRows);
+    _save();
+    _log('[DAY SCHOLAR MANAGER] ✓ Refresh added: id=$incomingId, docId=$incomingDocId');
+    return true;
+  }
 }
+

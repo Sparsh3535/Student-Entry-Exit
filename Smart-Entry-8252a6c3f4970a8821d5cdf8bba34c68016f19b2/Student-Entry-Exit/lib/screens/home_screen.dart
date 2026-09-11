@@ -23,6 +23,14 @@ import 'developers_space.dart';
 import '../managers/auth_email_service.dart';
 import '../managers/google_auth_service.dart';
 
+class RecentScan {
+  final String id;
+  final String text;
+  final String type;
+
+  RecentScan({required this.id, required this.text, required this.type});
+}
+
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
 
@@ -59,6 +67,9 @@ class _HomeScreenState extends State<HomeScreen> {
   // console logs
   final List<String> _logs = [];
 
+  // Recent scans for the "Super Chat" overlay
+  final List<RecentScan> _recentScans = [];
+
   @override
   void initState() {
     super.initState();
@@ -91,6 +102,11 @@ class _HomeScreenState extends State<HomeScreen> {
       dayScholarManager: _dayScholarManager,
       hostelManager: _hostelManager,
       leaveManager: _leaveManager,
+      onScanSuccess: (data) {
+        final name = data['name'] ?? 'Unknown';
+        final type = data['type'] ?? data['Type'] ?? 'Unknown';
+        _addRecentScan(name, type);
+      },
     );
     _qrAuthenticator.logCallback = _log;
     // Wire vehicle manager log callback
@@ -228,8 +244,28 @@ class _HomeScreenState extends State<HomeScreen> {
     // Do an initial check immediately
     _checkConnectivity();
 
-    _connectivityTimer = Timer.periodic(const Duration(seconds: 15), (_) {
-      _checkConnectivity();
+    _connectivityTimer = Timer.periodic(
+      const Duration(seconds: 15),
+      (_) => _checkConnectivity(),
+    );
+  }
+
+  void _addRecentScan(String text, String type) {
+    final scan = RecentScan(
+      id: DateTime.now().millisecondsSinceEpoch.toString(),
+      text: text,
+      type: type,
+    );
+    setState(() {
+      _recentScans.add(scan);
+    });
+    // Remove after 5 seconds
+    Timer(const Duration(seconds: 5), () {
+      if (mounted) {
+        setState(() {
+          _recentScans.removeWhere((s) => s.id == scan.id);
+        });
+      }
     });
   }
 
@@ -904,31 +940,17 @@ class _HomeScreenState extends State<HomeScreen> {
           '[DATA] Type: ${studentData['type']}, Name: ${studentData['name']}, ID: ${studentData['id']}',
         );
 
-        // ── VERSION CHECK: Require v2+ ──────────────────────────────────
-        final version = (studentData['version']?.toString() ?? '')
-            .trim()
-            .toLowerCase();
-        _log(
-          '[VERSION] Student app version: "${version.isEmpty ? "(none)" : version}"',
-        );
-
-        // Accept v2, v3, v4, ... — reject empty, v1, or any non-v2+ value
-        final versionNum = _parseVersionNumber(version);
-        if (versionNum < 2) {
-          _log(
-            '[VERSION] ❌ BLOCKED — student is on outdated version ($version). v2+ required.',
-          );
+        // ── VERSION CHECK: Require version or appVersion field ───────────────────
+        final versionField = (studentData['version']?.toString() ?? studentData['appVersion']?.toString() ?? '').trim();
+        if (versionField.isEmpty) {
+          _log('[VERSION] ❌ BLOCKED — student is missing the "version" or "appVersion" field.');
           final studentName = studentData['name']?.toString() ?? 'Unknown';
           final studentId = studentData['id']?.toString() ?? '';
-          // Show warning dialog (only for live scans and if context is available)
           if (mounted && !_isDrainingQueue) {
-            _showVersionWarning(studentName, studentId, version);
+            _showAppVersionWarning(studentName, studentId);
           }
-          // Return true to prevent queue from retrying forever
           return true;
         }
-        // ── END VERSION CHECK ────────────────────────────────────────────
-
         // Pass the fetched data directly to QRAuthenticator as a Map
         studentData['_docId'] = docId;
 
@@ -986,54 +1008,26 @@ class _HomeScreenState extends State<HomeScreen> {
       return false;
     }
   }
-
-  /// Parse a version string like "v2", "V3", "v10" → numeric part (2, 3, 10).
-  /// Returns 0 for empty, null, or unparseable strings.
-  int _parseVersionNumber(String version) {
-    if (version.isEmpty) return 0;
-    // Remove leading 'v' or 'V', then parse the number
-    final cleaned = version.replaceAll(RegExp(r'^[vV]'), '').trim();
-    return int.tryParse(cleaned) ?? 0;
-  }
-
-  /// Show a prominent warning dialog when a student is on an outdated app version.
-  /// Auto-dismisses after 6 seconds.
-  void _showVersionWarning(
-    String studentName,
-    String studentId,
-    String version,
-  ) {
+  /// Show a warning dialog when a student is missing the appVersion field.
+  void _showAppVersionWarning(String studentName, String studentId) {
     showDialog(
       context: context,
       barrierDismissible: true,
       builder: (ctx) {
-        // Auto-dismiss after 6 seconds
         Future.delayed(const Duration(seconds: 6), () {
           if (ctx.mounted) Navigator.of(ctx).pop();
         });
 
         return AlertDialog(
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(16),
-          ),
-          backgroundColor: Colors.red.shade50,
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+          backgroundColor: Colors.orange.shade50,
           title: Row(
             children: [
-              Icon(
-                Icons.warning_amber_rounded,
-                color: Colors.red.shade700,
-                size: 32,
-              ),
+              Icon(Icons.warning_amber_rounded, color: Colors.orange.shade800, size: 32),
               const SizedBox(width: 12),
               Expanded(
-                child: Text(
-                  'App Update Required',
-                  style: TextStyle(
-                    color: Colors.red.shade800,
-                    fontWeight: FontWeight.bold,
-                    fontSize: 20,
-                  ),
-                ),
+                child: Text('App Update Required',
+                  style: TextStyle(color: Colors.orange.shade900, fontWeight: FontWeight.bold, fontSize: 20)),
               ),
             ],
           ),
@@ -1047,62 +1041,27 @@ class _HomeScreenState extends State<HomeScreen> {
                 decoration: BoxDecoration(
                   color: Colors.white,
                   borderRadius: BorderRadius.circular(12),
-                  border: Border.all(color: Colors.red.shade200),
+                  border: Border.all(color: Colors.orange.shade200),
                 ),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text(
-                      studentName,
-                      style: const TextStyle(
-                        fontSize: 18,
-                        fontWeight: FontWeight.bold,
-                      ),
-                    ),
+                    Text(studentName, style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
                     if (studentId.isNotEmpty) ...[
                       const SizedBox(height: 4),
-                      Text(
-                        'ID: $studentId',
-                        style: TextStyle(
-                          fontSize: 14,
-                          color: Colors.grey.shade700,
-                        ),
-                      ),
+                      Text('ID: $studentId', style: TextStyle(fontSize: 14, color: Colors.grey.shade700)),
                     ],
-                    const SizedBox(height: 8),
-                    Container(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 10,
-                        vertical: 4,
-                      ),
-                      decoration: BoxDecoration(
-                        color: Colors.red.shade100,
-                        borderRadius: BorderRadius.circular(6),
-                      ),
-                      child: Text(
-                        'Current version: ${version.isEmpty ? "None (old app)" : version}',
-                        style: TextStyle(
-                          color: Colors.red.shade800,
-                          fontWeight: FontWeight.w600,
-                          fontSize: 13,
-                        ),
-                      ),
-                    ),
                   ],
                 ),
               ),
               const SizedBox(height: 16),
               Row(
                 children: [
-                  Icon(
-                    Icons.info_outline,
-                    color: Colors.red.shade400,
-                    size: 20,
-                  ),
+                  Icon(Icons.info_outline, color: Colors.orange.shade700, size: 20),
                   const SizedBox(width: 8),
                   const Expanded(
                     child: Text(
-                      'This student is using an older version of the app.\nPlease ask them to update to v2 or later.',
+                      'This student is using an old or invalid app version.\nPlease ask them to update their app.',
                       style: TextStyle(fontSize: 14, height: 1.5),
                     ),
                   ),
@@ -1113,18 +1072,134 @@ class _HomeScreenState extends State<HomeScreen> {
           actions: [
             TextButton(
               onPressed: () => Navigator.of(ctx).pop(),
-              child: Text(
-                'OK',
-                style: TextStyle(
-                  color: Colors.red.shade700,
-                  fontWeight: FontWeight.bold,
-                ),
-              ),
+              child: Text('OK', style: TextStyle(color: Colors.orange.shade900, fontWeight: FontWeight.bold)),
             ),
           ],
         );
       },
     );
+  }
+
+  /// Fetch all entries from Firestore (gate_passes + leave_requests) and
+  /// re-populate the Day Scholar, Hostel, and Leave Application tables.
+  /// Only adds entries that are NOT already on screen (duplicate-safe).
+  Future<void> _refreshFromDatabase() async {
+    _log('[REFRESH] Starting database refresh...');
+
+    // Show progress dialog
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        content: Row(
+          children: const [
+            CircularProgressIndicator(),
+            SizedBox(width: 20),
+            Expanded(
+              child: Text(
+                'Fetching entries from database...\nThis may take a few seconds.',
+                style: TextStyle(fontSize: 14),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+
+    try {
+      // Fetch both collections in parallel (server-only, no cache)
+      final results = await Future.wait([
+        _firebaseService.fetchAllGatePassesWithDocId(),
+        _firebaseService.fetchAllLeaveRequestsWithDocId(),
+      ]);
+
+      final gatePasses = results[0];
+      final leaveRequests = results[1];
+
+      _log('[REFRESH] Fetched ${gatePasses.length} gate_passes, ${leaveRequests.length} leave_requests');
+
+      // Clear earlier incomplete entries to strictly sync with database
+      _dayScholarManager.clearIncomplete();
+      _hostelManager.clearIncomplete();
+      _leaveManager.clearIncomplete();
+      _log('[REFRESH] Cleared earlier local incomplete entries to sync with DB');
+
+      int dayScholarAdded = 0;
+      int hostelAdded = 0;
+      int leaveAdded = 0;
+      int skipped = 0;
+
+      // Route gate_passes by type
+      for (final entry in gatePasses) {
+        final type = (entry['type']?.toString() ?? '').toLowerCase();
+        if (type.contains('hostel') || type.contains('hosteller')) {
+          if (_hostelManager.addFromRefresh(entry)) {
+            hostelAdded++;
+          } else {
+            skipped++;
+          }
+        } else if (type.contains('leave')) {
+          if (_leaveManager.addFromRefresh(entry)) {
+            leaveAdded++;
+          } else {
+            skipped++;
+          }
+        } else {
+          // Default: day_scholar
+          if (_dayScholarManager.addFromRefresh(entry)) {
+            dayScholarAdded++;
+          } else {
+            skipped++;
+          }
+        }
+      }
+
+      // Route leave_requests
+      for (final entry in leaveRequests) {
+        if (_leaveManager.addFromRefresh(entry)) {
+          leaveAdded++;
+        } else {
+          skipped++;
+        }
+      }
+
+      _log('[REFRESH] ✓ Done. Added: DS=$dayScholarAdded, Hostel=$hostelAdded, Leave=$leaveAdded, Skipped=$skipped');
+
+      // Close progress dialog
+      if (mounted) Navigator.of(context).pop();
+
+      // Show summary snackbar
+      if (mounted) {
+        final totalAdded = dayScholarAdded + hostelAdded + leaveAdded;
+        final totalFetched = gatePasses.length + leaveRequests.length;
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              totalAdded > 0
+                  ? '✓ Synced with database: $totalAdded active entries restored (Day: $dayScholarAdded, Hostel: $hostelAdded, Leave: $leaveAdded)'
+                  : '✓ Database checked: No new active entries found',
+            ),
+            backgroundColor: totalAdded > 0 ? Colors.green.shade700 : Colors.blue.shade700,
+            duration: const Duration(seconds: 5),
+          ),
+        );
+      }
+    } catch (e) {
+      _log('[REFRESH] ✗ Error: $e');
+      // Close progress dialog
+      if (mounted) Navigator.of(context).pop();
+      // Show error snackbar
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('✗ Refresh failed: $e'),
+            backgroundColor: Colors.red.shade700,
+            duration: const Duration(seconds: 5),
+          ),
+        );
+      }
+    }
   }
 
   // Left navigation pane
@@ -1287,6 +1362,56 @@ class _HomeScreenState extends State<HomeScreen> {
                               ],
                             ),
                           ),
+                          const SizedBox(height: 20),
+                          const Text(
+                            'Refresh from Database',
+                            style: TextStyle(
+                              fontWeight: FontWeight.bold,
+                              fontSize: 15,
+                            ),
+                          ),
+                          const SizedBox(height: 8),
+                          Container(
+                            width: double.infinity,
+                            padding: const EdgeInsets.all(12),
+                            decoration: BoxDecoration(
+                              color: Colors.blue.shade50,
+                              borderRadius: BorderRadius.circular(8),
+                              border: Border.all(color: Colors.blue.shade200),
+                            ),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Row(
+                                  children: [
+                                    Icon(
+                                      Icons.cloud_download_outlined,
+                                      color: Colors.blue.shade700,
+                                      size: 18,
+                                    ),
+                                    const SizedBox(width: 8),
+                                    Expanded(
+                                      child: Text(
+                                        'Recover entries from database if local data was lost',
+                                        style: TextStyle(
+                                          color: Colors.blue.shade800,
+                                          fontSize: 13,
+                                        ),
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                                const SizedBox(height: 6),
+                                Text(
+                                  'Fetches all active entries from Firestore and adds missing ones to Day Scholar, Hostel, and Leave tables.',
+                                  style: TextStyle(
+                                    color: Colors.grey.shade600,
+                                    fontSize: 12,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
                         ],
                       ),
                     ),
@@ -1294,6 +1419,21 @@ class _HomeScreenState extends State<HomeScreen> {
                       TextButton(
                         onPressed: () => Navigator.of(ctx).pop(),
                         child: const Text('Close'),
+                      ),
+                      ElevatedButton.icon(
+                        icon: const Icon(Icons.cloud_download, size: 16),
+                        label: const Text('Refresh from DB'),
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: Colors.blue.shade700,
+                          foregroundColor: Colors.white,
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(8),
+                          ),
+                        ),
+                        onPressed: () {
+                          Navigator.of(ctx).pop();
+                          _refreshFromDatabase();
+                        },
                       ),
                       ElevatedButton.icon(
                         icon: const Icon(Icons.edit, size: 16),
@@ -1678,7 +1818,20 @@ class _HomeScreenState extends State<HomeScreen> {
                 ),
               ),
             ),
-            Expanded(child: _buildMainContent()),
+            Expanded(
+              child: Stack(
+                children: [
+                  _buildMainContent(),
+                  if (_recentScans.isNotEmpty)
+                    Align(
+                      alignment: Alignment.topRight,
+                      child: IgnorePointer(
+                        child: _buildRecentScansOverlay(),
+                      ),
+                    ),
+                ],
+              ),
+            ),
             const SizedBox(height: 8),
             // Security card: shows the current security person's name (read-only UI)
             Card(
@@ -1714,6 +1867,76 @@ class _HomeScreenState extends State<HomeScreen> {
             ),
           ],
         ),
+      ),
+    );
+  }
+  Widget _buildRecentScansOverlay() {
+    return SizedBox(
+      width: 320,
+      child: ListView.builder(
+        shrinkWrap: true,
+        itemCount: _recentScans.length,
+        itemBuilder: (context, index) {
+          final scan = _recentScans[index];
+          // Use AnimatedOpacity for a simple fade-in effect if desired,
+          // but just a clean translucent Container is great too.
+          return Padding(
+            padding: const EdgeInsets.only(bottom: 8.0, right: 8.0, top: 8.0),
+            child: Container(
+              padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 16),
+              decoration: BoxDecoration(
+                color: Colors.black.withOpacity(0.7),
+                borderRadius: BorderRadius.circular(12),
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black.withOpacity(0.2),
+                    blurRadius: 8,
+                    offset: const Offset(0, 4),
+                  ),
+                ],
+              ),
+              child: Row(
+                children: [
+                  Icon(
+                    scan.type.toLowerCase().contains('hostel')
+                        ? Icons.apartment
+                        : scan.type.toLowerCase().contains('leave')
+                            ? Icons.assignment
+                            : Icons.person_outline,
+                    color: Colors.white,
+                    size: 24,
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Text(
+                          scan.text,
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontSize: 16,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                        const SizedBox(height: 4),
+                        Text(
+                          scan.type.toUpperCase(),
+                          style: TextStyle(
+                            color: Colors.white.withOpacity(0.8),
+                            fontSize: 12,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          );
+        },
       ),
     );
   }

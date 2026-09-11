@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
+import 'package:firebase_auth/firebase_auth.dart';
 import 'app_directory.dart';
 
 /// Handles Google OAuth 2.0 sign-in for Windows desktop via browser redirect.
@@ -219,6 +220,25 @@ class GoogleAuthService {
         return null;
       }
 
+      // Step 7: Sign in to Firebase Auth using the Google credentials
+      onStatusUpdate?.call('Signing into Firebase...');
+      try {
+        final accessToken = tokenData['access_token'] as String?;
+        final credential = FirebaseAuth.instance.signInWithCredential(
+          GoogleAuthProvider.credential(
+            idToken: idToken,
+            accessToken: accessToken,
+          ),
+        );
+        await credential;
+        debugPrint('[GoogleAuthService] ✓ Firebase Auth sign-in successful');
+      } catch (e) {
+        debugPrint('[GoogleAuthService] Firebase Auth sign-in failed: $e');
+        onStatusUpdate?.call('Firebase sign-in failed');
+        // Continue anyway? The desktop app still relies on email matching locally.
+        // But Firestore writes will fail if this fails.
+      }
+
       // Save signed-in state
       _signedInEmail = email;
       await _persistConfig();
@@ -269,6 +289,11 @@ class GoogleAuthService {
   Future<void> signOut() async {
     _signedInEmail = '';
     await _persistConfig();
+    try {
+      await FirebaseAuth.instance.signOut();
+    } catch (e) {
+      debugPrint('[GoogleAuthService] Firebase signOut error: $e');
+    }
     debugPrint('[GoogleAuthService] ✓ Signed out');
   }
 

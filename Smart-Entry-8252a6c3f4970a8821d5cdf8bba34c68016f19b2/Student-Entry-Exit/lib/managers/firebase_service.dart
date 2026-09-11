@@ -57,12 +57,15 @@ class FirebaseService {
       print('[Firebase Service] Starting fetch for docId: $docId');
 
       // Query BOTH collections in parallel to cut latency in half
+      // Force server fetch to avoid stale persistent cache returning null
+      // for documents that actually exist on the server.
       print(
-        '[Firebase Service] Querying gate_passes + leave_requests in parallel...',
+        '[Firebase Service] Querying gate_passes + leave_requests in parallel (server fetch)...',
       );
+      const serverOnly = GetOptions(source: Source.server);
       final results = await Future.wait([
-        _firestore.collection('gate_passes').doc(docId).get(),
-        _firestore.collection('leave_requests').doc(docId).get(),
+        _firestore.collection('gate_passes').doc(docId).get(serverOnly),
+        _firestore.collection('leave_requests').doc(docId).get(serverOnly),
       ]);
 
       final gatePassDoc = results[0];
@@ -565,6 +568,56 @@ class FirebaseService {
     } catch (e) {
       print('[Firebase Error] Failed to fetch leave requests: $e');
       return [];
+    }
+  }
+
+  /// Fetch ALL gate_passes documents with their Firestore document IDs.
+  /// Used by the "Refresh from Database" feature to recover screen data.
+  /// Uses server-only fetch to bypass stale persistent cache.
+  Future<List<Map<String, dynamic>>> fetchAllGatePassesWithDocId() async {
+    try {
+      print('[Firebase Service] Fetching ALL gate_passes (server fetch)...');
+      final snapshot = await _firestore.collection('gate_passes').get(
+        const GetOptions(source: Source.server),
+      );
+      final results = <Map<String, dynamic>>[];
+      for (final doc in snapshot.docs) {
+        final normalized = _normalizeGatePassData(doc.data());
+        normalized['_docId'] = doc.id;
+        results.add(normalized);
+      }
+      print(
+        '[Firebase Service] ✓ Fetched ${results.length} gate_passes with docIds',
+      );
+      return results;
+    } catch (e) {
+      print('[Firebase Service] ✗ Error fetching all gate_passes: $e');
+      rethrow;
+    }
+  }
+
+  /// Fetch ALL leave_requests documents with their Firestore document IDs.
+  /// Used by the "Refresh from Database" feature to recover screen data.
+  /// Uses server-only fetch to bypass stale persistent cache.
+  Future<List<Map<String, dynamic>>> fetchAllLeaveRequestsWithDocId() async {
+    try {
+      print('[Firebase Service] Fetching ALL leave_requests (server fetch)...');
+      final snapshot = await _firestore.collection('leave_requests').get(
+        const GetOptions(source: Source.server),
+      );
+      final results = <Map<String, dynamic>>[];
+      for (final doc in snapshot.docs) {
+        final normalized = _normalizeLeaveRequestData(doc.data());
+        normalized['_docId'] = doc.id;
+        results.add(normalized);
+      }
+      print(
+        '[Firebase Service] ✓ Fetched ${results.length} leave_requests with docIds',
+      );
+      return results;
+    } catch (e) {
+      print('[Firebase Service] ✗ Error fetching all leave_requests: $e');
+      rethrow;
     }
   }
 }

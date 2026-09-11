@@ -1,5 +1,23 @@
 // Shared utilities for data processing across all managers
 
+/// Format as "hh:mm AM/PM" — used for Day Scholar and Hostel intime/outtime
+String shortTimeOnly(DateTime dt) {
+  final hour12 = dt.hour == 0 ? 12 : (dt.hour > 12 ? dt.hour - 12 : dt.hour);
+  final minute = dt.minute.toString().padLeft(2, '0');
+  final ampm = dt.hour >= 12 ? 'PM' : 'AM';
+  return '$hour12:$minute $ampm';
+}
+
+/// Format as "dd-MM-yyyy hh:mm AM/PM" — used for Leave Application leaving/returning
+String shortDateTimeReadable(DateTime dt) {
+  String two(int n) => n.toString().padLeft(2, '0');
+  final hour12 = dt.hour == 0 ? 12 : (dt.hour > 12 ? dt.hour - 12 : dt.hour);
+  final minute = two(dt.minute);
+  final ampm = dt.hour >= 12 ? 'PM' : 'AM';
+  return '${two(dt.day)}-${two(dt.month)}-${dt.year} $hour12:$minute $ampm';
+}
+
+/// Full datetime for internal use/queued scan parsing (yyyy-MM-dd HH:mm:ss)
 String shortDateTime(DateTime dt) {
   String two(int n) => n.toString().padLeft(2, '0');
   return '${dt.year}-${two(dt.month)}-${two(dt.day)} ${two(dt.hour)}:${two(dt.minute)}:${two(dt.second)}';

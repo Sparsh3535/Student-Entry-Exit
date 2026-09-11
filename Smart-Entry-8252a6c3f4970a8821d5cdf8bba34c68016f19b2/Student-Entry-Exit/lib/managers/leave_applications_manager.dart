@@ -229,9 +229,12 @@ class LeaveApplicationsManager {
     final queued = fields['_scanTime']?.toString() ?? '';
     if (queued.isNotEmpty) {
       _log('[LEAVE MANAGER] ⏱ Using queued scan time: $queued');
+      // Parse queued ISO time and convert to readable format
+      final parsed = DateTime.tryParse(queued);
+      if (parsed != null) return shortDateTimeReadable(parsed);
       return queued;
     }
-    return shortDateTime(DateTime.now());
+    return shortDateTimeReadable(DateTime.now());
   }
 
   /// Helper method for logging
@@ -406,4 +409,63 @@ class LeaveApplicationsManager {
       }
     }
   }
+
+  /// Clears all incomplete entries (missing returning time).
+  /// Used during database refresh to replace local state with database state.
+  void clearIncomplete() {
+    final before = _leaveApps.length;
+    _leaveApps.removeWhere((row) => (row['returning']?.toString() ?? '').trim().isEmpty);
+    if (_leaveApps.length != before) {
+      notifier.value = List<Map<String, dynamic>>.from(_leaveApps);
+      _save();
+      _log('[LEAVE MANAGER] Cleared ${before - _leaveApps.length} incomplete entries for refresh.');
+    }
+  }
+
+  /// Add a row from a database refresh (Refresh from Database button).
+  /// Only adds if a row with the same _docId or same student id does NOT
+  /// already exist on screen. This prevents duplicates when refreshing.
+  /// Returns true if the row was added, false if skipped (duplicate).
+  bool addFromRefresh(Map<String, dynamic> fields) {
+    final incomingDocId = fields['_docId']?.toString() ?? '';
+    final incomingId = fields['id']?.toString() ?? '';
+
+    // Check for duplicate by _docId
+    if (incomingDocId.isNotEmpty) {
+      for (final row in _leaveApps) {
+        if (row['_docId']?.toString() == incomingDocId) {
+          _log('[LEAVE MANAGER] ⏭ Refresh skip: _docId $incomingDocId already on screen');
+          return false;
+        }
+      }
+    }
+
+    // Check for duplicate by student id (only incomplete rows)
+    if (incomingId.isNotEmpty) {
+      for (final row in _leaveApps) {
+        final rowId = row['id']?.toString() ?? '';
+        final returning = (row['returning']?.toString() ?? '').trim();
+        if (rowId == incomingId && returning.isEmpty) {
+          _log('[LEAVE MANAGER] ⏭ Refresh skip: id $incomingId already has incomplete row');
+          return false;
+        }
+      }
+    }
+
+    // Add new row with leaving set from normalized data, returning empty
+    final normalized = Map<String, dynamic>.from(fields);
+    // Use 'leaving' from normalized data if available, otherwise use current time
+    normalized['leaving'] = normalized['leaving'] ??
+        (normalized['leavingDate']?.toString() ?? shortDateTimeReadable(DateTime.now()));
+    normalized['returning'] = null;
+    normalized['duration'] = '';
+    normalized['receivedAt'] = shortDateTimeReadable(DateTime.now());
+    normalized['security'] = SecurityNameService().name;
+    _leaveApps.add(normalized);
+    notifier.value = List<Map<String, dynamic>>.from(_leaveApps);
+    _save();
+    _log('[LEAVE MANAGER] ✓ Refresh added: id=$incomingId, docId=$incomingDocId');
+    return true;
+  }
 }
+

@@ -44,7 +44,7 @@ class _HostelScreenState extends State<HostelScreen> {
     return id.contains(q) || name.contains(q);
   }
 
-  /// Show a time picker and return the selected time formatted as "yyyy-MM-dd HH:mm:ss"
+  /// Show a time picker and save time-only as "hh:mm AM/PM"
   Future<void> _pickTime(int originalIndex, String field) async {
     final picked = await showTimePicker(
       context: context,
@@ -52,10 +52,10 @@ class _HostelScreenState extends State<HostelScreen> {
       helpText: 'Select ${field == 'intime' ? 'In' : 'Out'} Time',
     );
     if (picked != null && widget.onTimeEdited != null) {
-      final now = DateTime.now();
-      final dt = DateTime(now.year, now.month, now.day, picked.hour, picked.minute, 0);
-      String two(int n) => n.toString().padLeft(2, '0');
-      final formatted = '${dt.year}-${two(dt.month)}-${two(dt.day)} ${two(dt.hour)}:${two(dt.minute)}:${two(dt.second)}';
+      final hour12 = picked.hour == 0 ? 12 : (picked.hour > 12 ? picked.hour - 12 : picked.hour);
+      final minute = picked.minute.toString().padLeft(2, '0');
+      final ampm = picked.hour >= 12 ? 'PM' : 'AM';
+      final formatted = '$hour12:$minute $ampm';
       widget.onTimeEdited!(originalIndex, field, formatted);
     }
   }

@@ -194,9 +194,12 @@ class HostelManager {
     final queued = fields['_scanTime']?.toString() ?? '';
     if (queued.isNotEmpty) {
       _log('[HOSTEL MANAGER] ⏱ Using queued scan time: $queued');
+      // Parse queued ISO time and convert to time-only format
+      final parsed = DateTime.tryParse(queued);
+      if (parsed != null) return shortTimeOnly(parsed);
       return queued;
     }
-    return shortDateTime(DateTime.now());
+    return shortTimeOnly(DateTime.now());
   }
 
   /// Helper method for logging
@@ -257,4 +260,60 @@ class HostelManager {
       }
     }
   }
+
+  /// Clears all incomplete entries (missing intime).
+  /// Used during database refresh to replace local state with database state.
+  void clearIncomplete() {
+    final before = _hostelRows.length;
+    _hostelRows.removeWhere((row) => (row['intime']?.toString() ?? '').trim().isEmpty);
+    if (_hostelRows.length != before) {
+      notifier.value = List<Map<String, dynamic>>.from(_hostelRows);
+      _save();
+      _log('[HOSTEL MANAGER] Cleared ${before - _hostelRows.length} incomplete entries for refresh.');
+    }
+  }
+
+  /// Add a row from a database refresh (Refresh from Database button).
+  /// Only adds if a row with the same _docId or same student id does NOT
+  /// already exist on screen. This prevents duplicates when refreshing.
+  /// Returns true if the row was added, false if skipped (duplicate).
+  bool addFromRefresh(Map<String, dynamic> fields) {
+    final incomingDocId = fields['_docId']?.toString() ?? '';
+    final incomingId = fields['id']?.toString() ?? '';
+
+    // Check for duplicate by _docId
+    if (incomingDocId.isNotEmpty) {
+      for (final row in _hostelRows) {
+        if (row['_docId']?.toString() == incomingDocId) {
+          _log('[HOSTEL MANAGER] ⏭ Refresh skip: _docId $incomingDocId already on screen');
+          return false;
+        }
+      }
+    }
+
+    // Check for duplicate by student id (only incomplete rows)
+    if (incomingId.isNotEmpty) {
+      for (final row in _hostelRows) {
+        final rowId = row['id']?.toString() ?? '';
+        final intime = (row['intime']?.toString() ?? '').trim();
+        // Hostel: incomplete = intime empty (outtime is filled first)
+        if (rowId == incomingId && intime.isEmpty) {
+          _log('[HOSTEL MANAGER] ⏭ Refresh skip: id $incomingId already has incomplete row');
+          return false;
+        }
+      }
+    }
+
+    // Add new row with outtime set, intime empty (hostel: out first, in second)
+    final normalized = Map<String, dynamic>.from(fields);
+    normalized['outtime'] = normalized['outtime'] ?? shortTimeOnly(DateTime.now());
+    normalized['intime'] = null;
+    normalized['security'] = SecurityNameService().name;
+    _hostelRows.add(normalized);
+    notifier.value = List<Map<String, dynamic>>.from(_hostelRows);
+    _save();
+    _log('[HOSTEL MANAGER] ✓ Refresh added: id=$incomingId, docId=$incomingDocId');
+    return true;
+  }
 }
+

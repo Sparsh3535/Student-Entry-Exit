@@ -11,11 +11,13 @@ class QRAuthenticator {
   final LeaveApplicationsManager leaveManager;
 
   Function(String)? logCallback;
+  Function(Map<String, dynamic>)? onScanSuccess;
 
   QRAuthenticator({
     required this.dayScholarManager,
     required this.hostelManager,
     required this.leaveManager,
+    this.onScanSuccess,
   });
 
   /// Process incoming buffer data (handles JSON and key:value pairs)
@@ -162,6 +164,7 @@ class QRAuthenticator {
 
       leaveManager.addOrUpdateRow(raw);
       _log('✓ Routed to Leave (name: ${raw['name']}, id: ${raw['id']})');
+      onScanSuccess?.call(raw);
       return true;
     }
 
@@ -181,6 +184,7 @@ class QRAuthenticator {
 
       hostelManager.addOrUpdateRow(raw);
       _log('✓ Routed to Hostel (name: ${raw['name']}, id: ${raw['id']})');
+      onScanSuccess?.call(raw);
       return true;
     }
 
@@ -200,6 +204,7 @@ class QRAuthenticator {
 
       dayScholarManager.addOrUpdateRow(raw);
       _log('✓ Routed to Day Scholar (name: ${raw['name']}, id: ${raw['id']})');
+      onScanSuccess?.call(raw);
       return true;
     }
 

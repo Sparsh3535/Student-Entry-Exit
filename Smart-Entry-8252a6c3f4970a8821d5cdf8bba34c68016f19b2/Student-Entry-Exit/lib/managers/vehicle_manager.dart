@@ -24,17 +24,42 @@ class VehicleManager {
 
   // ── Persistence ───────────────────────────────────────────────────────
 
-  /// Load previously saved rows (with in/out times) from disk.
+  /// Load previously saved rows from disk.
   /// Called once at app startup BEFORE the first fetch.
+  /// Incomplete rows (missing inTime or outTime) survive across midnight.
   Future<void> loadFromStorage() async {
     try {
-      // Use load() — auto-exports CSV and clears if from a previous day
-      final saved = await LocalStorageService().load('vehicle');
-      if (saved.isNotEmpty) {
+      // Use loadRaw so we can manually handle which rows to keep
+      final saved = await LocalStorageService().loadRaw('vehicle');
+      if (saved.isEmpty) {
+        _log('[VEHICLE] No saved vehicle rows (first run)');
+        return;
+      }
+
+      final now = DateTime.now();
+      String two(int n) => n.toString().padLeft(2, '0');
+      final todayStr = '${now.year}-${two(now.month)}-${two(now.day)}';
+
+      // Get the saved date from file
+      // We'll read it via the raw file — check if today
+      final rawPayload = await LocalStorageService().getRawPayload('vehicle');
+      final savedDate = rawPayload?['date'] as String? ?? '';
+
+      if (savedDate == todayStr || savedDate.isEmpty) {
+        // Same day — load all rows
         notifier.value = saved;
         _log('[VEHICLE] ✓ Loaded ${saved.length} row(s) from local storage');
       } else {
-        _log('[VEHICLE] No saved vehicle rows (new day or first run)');
+        // Different day — keep only incomplete rows (missing inTime or outTime)
+        final incomplete = saved.where((r) {
+          final inT = (r['inTime']?.toString() ?? '').trim();
+          final outT = (r['outTime']?.toString() ?? '').trim();
+          return inT.isEmpty || outT.isEmpty;
+        }).toList();
+        notifier.value = incomplete;
+        _log('[VEHICLE] New day — kept ${incomplete.length} incomplete row(s), dropped ${saved.length - incomplete.length} completed');
+        // Re-save with only incomplete rows for today
+        await _saveToStorage();
       }
     } catch (e) {
       _log('[VEHICLE] ✗ Failed to load from storage: $e');
@@ -111,29 +136,31 @@ class VehicleManager {
     await _saveToStorage();
   }
 
-  /// Record OUT time, persist to disk, then delete the Firebase document
-  /// from `vehicle_request` (only if status is approved/active).
-  /// vehicle_history is never touched — kept for oversight.
+  /// Record OUT time, delete from vehicle_requests in Firebase.
+  /// Row stays on screen (turns green) — cleared at midnight like other screens.
   Future<void> markOut(String docId) async {
     final timeStr = _nowTime();
-    _updateRowField(docId, 'outTime', timeStr);
-    _log('[VEHICLE] ✓ OUT recorded for $docId: $timeStr');
-    await _saveToStorage();
 
-    // Only delete approved/active entries from Firebase — rejected ones stay
+    // Find the row first (needed for status check and logging)
     final row = notifier.value.firstWhere(
       (r) => r['_docId']?.toString() == docId,
       orElse: () => <String, dynamic>{},
     );
     final status = (row['status']?.toString() ?? '').toLowerCase().trim();
 
+    // Update outTime in local state
+    _updateRowField(docId, 'outTime', timeStr);
+    _log('[VEHICLE] ✓ OUT recorded for $docId: $timeStr, status=$status');
+    await _saveToStorage();
+
+    // Delete from Firebase vehicle_requests (unless rejected)
     if (status == 'rejected' || status == 'denied') {
-      _log('[VEHICLE] ⚠ Skipping Firebase delete — status is "$status" (must stay in vehicle_request)');
+      _log('[VEHICLE] ⚠ Skipping Firebase delete — status is "$status"');
     } else {
-      _log('[VEHICLE] 🗑 Deleting from vehicle_request: $docId');
+      _log('[VEHICLE] 🗑 Deleting from vehicle_requests: $docId');
       try {
         await FirebaseService().deleteVehicleRequestDocument(docId);
-        _log('[VEHICLE] ✓ vehicle_request document deleted: $docId');
+        _log('[VEHICLE] ✓ vehicle_requests document deleted: $docId');
       } catch (e) {
         _log('[VEHICLE] ✗ Firebase delete failed for $docId: $e');
       }
@@ -142,6 +169,22 @@ class VehicleManager {
 
   // ── Midnight reset ────────────────────────────────────────────────────
 
+  /// Clear only COMPLETED rows (both inTime AND outTime filled).
+  /// Rows missing either time stay on screen — they need attention.
+  void clearCompleted() {
+    final before = notifier.value.length;
+    notifier.value = notifier.value.where((r) {
+      final inT = (r['inTime']?.toString() ?? '').trim();
+      final outT = (r['outTime']?.toString() ?? '').trim();
+      // Keep row if either time is missing
+      return inT.isEmpty || outT.isEmpty;
+    }).toList();
+    final removed = before - notifier.value.length;
+    _log('[VEHICLE] clearCompleted: removed $removed completed, keeping ${notifier.value.length} incomplete');
+    LocalStorageService().save('vehicle', notifier.value);
+  }
+
+  /// Clear ALL rows (full reset).
   void clear() {
     notifier.value = [];
     lastPollTimeNotifier.value = null;
@@ -151,10 +194,14 @@ class VehicleManager {
 
   // ── Internals ─────────────────────────────────────────────────────────
 
+  /// Returns date + time as "dd-MM-yyyy hh:mm AM/PM"
   String _nowTime() {
     final now = DateTime.now();
     String two(int n) => n.toString().padLeft(2, '0');
-    return '${now.year}-${two(now.month)}-${two(now.day)} ${two(now.hour)}:${two(now.minute)}:${two(now.second)}';
+    final hour12 = now.hour == 0 ? 12 : (now.hour > 12 ? now.hour - 12 : now.hour);
+    final minute = two(now.minute);
+    final ampm = now.hour >= 12 ? 'PM' : 'AM';
+    return '${two(now.day)}-${two(now.month)}-${now.year} $hour12:$minute $ampm';
   }
 
   void _updateRowField(String docId, String key, String value) {

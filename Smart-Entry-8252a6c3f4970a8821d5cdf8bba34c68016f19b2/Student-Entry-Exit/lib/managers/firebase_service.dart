@@ -333,6 +333,20 @@ class FirebaseService {
         ? data['comingFrom'].toString()
         : data['destination']?.toString() ?? '';
 
+    // Extract creation timestamp (Timestamp, ISO string, etc.)
+    final rawCreatedAt = data['createdAt'] ??
+        data['created_at'] ??
+        data['timestamp'] ??
+        data['creationTime'] ??
+        data['createdDate'] ??
+        data['date'];
+    String createdAtStr = '';
+    if (rawCreatedAt is Timestamp) {
+      createdAtStr = rawCreatedAt.toDate().toIso8601String();
+    } else if (rawCreatedAt != null) {
+      createdAtStr = rawCreatedAt.toString();
+    }
+
     return {
       'type': data['type']?.toString() ?? 'day_scholar',
       'name': name,
@@ -344,7 +358,8 @@ class FirebaseService {
       'comingFrom': data['comingFrom']?.toString() ?? '',
       'hostel': data['hostel']?.toString() ?? '',
       'roomNumber': data['roomNumber']?.toString() ?? '',
-      'createdAt': data['createdAt']?.toString() ?? '',
+      'createdAt': createdAtStr,
+      'createdAtRaw': rawCreatedAt,
       'scanCount': data['scanCount'] ?? 0,
       'location': location,
       'security': null,

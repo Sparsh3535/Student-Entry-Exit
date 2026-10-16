@@ -55,9 +55,14 @@ class HostelManager {
           : DateTime.now();
 
       final lastScan = _lastScanTime[scanKey];
-      if (lastScan != null && scanMoment.difference(lastScan).abs() < _scanCooldown) {
-        _log('[HOSTEL MANAGER] ⚠ COOLDOWN: Ignoring duplicate scan for $scanKey (within 10s)');
-        logCallback?.call('Hostel: duplicate scan ignored for $scanKey (10s cooldown)');
+      if (lastScan != null &&
+          scanMoment.difference(lastScan).abs() < _scanCooldown) {
+        _log(
+          '[HOSTEL MANAGER] ⚠ COOLDOWN: Ignoring duplicate scan for $scanKey (within 10s)',
+        );
+        logCallback?.call(
+          'Hostel: duplicate scan ignored for $scanKey (10s cooldown)',
+        );
         return;
       }
       _lastScanTime[scanKey] = scanMoment;
@@ -79,16 +84,20 @@ class HostelManager {
       // Check if this scan is from a DIFFERENT gate pass (different _docId)
       final existingDocId = r['_docId']?.toString() ?? '';
       final incomingDocId = fields['_docId']?.toString() ?? '';
-      final isDifferentGatePass = existingDocId.isNotEmpty &&
+      final isDifferentGatePass =
+          existingDocId.isNotEmpty &&
           incomingDocId.isNotEmpty &&
           existingDocId != incomingDocId;
 
       // If different gate pass and old one wasn't completed, create new row
-      final oldIncomplete = (prevIn == null || prevIn.toString().trim().isEmpty) ||
+      final oldIncomplete =
+          (prevIn == null || prevIn.toString().trim().isEmpty) ||
           (prevOut == null || prevOut.toString().trim().isEmpty);
 
       if (isDifferentGatePass && oldIncomplete) {
-        _log('[HOSTEL MANAGER] Different docId ($incomingDocId vs $existingDocId) — creating new row');
+        _log(
+          '[HOSTEL MANAGER] Different docId ($incomingDocId vs $existingDocId) — creating new row',
+        );
         final newRow = Map<String, dynamic>.from(fields);
         newRow['outtime'] = now;
         newRow['intime'] = null;
@@ -106,6 +115,8 @@ class HostelManager {
         if (prevOut == null || prevOut.toString().trim().isEmpty) {
           // first relevant scan -> set outtime
           r['outtime'] = now;
+          // Promote from session-only to persistent
+          r.remove('_source');
           final loc = fields['location'];
           if (loc != null && loc.toString().trim().isNotEmpty) {
             r['location'] = loc;
@@ -162,7 +173,9 @@ class HostelManager {
     // not found -> add with outtime set (first scan, preserve all incoming fields)
     final normalized = Map<String, dynamic>.from(fields);
     normalized['intime'] = null;
-    normalized['outtime'] = _resolveScanTime(fields); // actual scan time, not now
+    normalized['outtime'] = _resolveScanTime(
+      fields,
+    ); // actual scan time, not now
     normalized['security'] = SecurityNameService().name;
     _log('[HOSTEL MANAGER] Creating new row: $normalized');
     _hostelRows.add(normalized);
@@ -207,19 +220,23 @@ class HostelManager {
     logCallback?.call(message);
   }
 
-  /// Save current rows to local storage
+  /// Save current rows to local storage.
+  /// DB-refresh entries (_source == 'db_refresh') are excluded — session-only.
   void _save() {
-    LocalStorageService().save('hostel', _hostelRows);
+    final persistable = _hostelRows
+        .where((row) => row['_source'] != 'db_refresh')
+        .toList();
+    LocalStorageService().save('hostel', persistable);
   }
 
-  /// Load previously saved rows from local storage (daily reset applied)
   Future<void> loadFromStorage() async {
     final saved = await LocalStorageService().load('hostel');
     if (saved.isNotEmpty) {
       _hostelRows.clear();
-      _hostelRows.addAll(saved);
+      // Filter out any DB-refresh entries that somehow got persisted
+      _hostelRows.addAll(saved.where((row) => row['_source'] != 'db_refresh'));
       notifier.value = List<Map<String, dynamic>>.from(_hostelRows);
-      _log('[HOSTEL MANAGER] Loaded ${saved.length} rows from storage');
+      _log('[HOSTEL MANAGER] Loaded ${_hostelRows.length} rows from storage (filtered DB-refresh entries)');
     }
   }
 
@@ -240,7 +257,9 @@ class HostelManager {
       return;
     }
     final r = _hostelRows[rowIndex];
-    _log('[HOSTEL MANAGER] Manual time entry: row=$rowIndex, field=$field, time=$formattedTime');
+    _log(
+      '[HOSTEL MANAGER] Manual time entry: row=$rowIndex, field=$field, time=$formattedTime',
+    );
 
     r[field] = formattedTime;
     _hostelRows[rowIndex] = Map<String, dynamic>.from(r);
@@ -255,7 +274,9 @@ class HostelManager {
     if (intime.isNotEmpty && outtime.isNotEmpty) {
       final docId = r['_docId']?.toString();
       if (docId != null && docId.isNotEmpty) {
-        _log('[HOSTEL MANAGER] ✓ Both times filled after manual entry — triggering onEntryComplete');
+        _log(
+          '[HOSTEL MANAGER] ✓ Both times filled after manual entry — triggering onEntryComplete',
+        );
         onEntryComplete?.call(docId);
       }
     }
@@ -265,11 +286,15 @@ class HostelManager {
   /// Used during database refresh to replace local state with database state.
   void clearIncomplete() {
     final before = _hostelRows.length;
-    _hostelRows.removeWhere((row) => (row['intime']?.toString() ?? '').trim().isEmpty);
+    _hostelRows.removeWhere(
+      (row) => (row['intime']?.toString() ?? '').trim().isEmpty,
+    );
     if (_hostelRows.length != before) {
       notifier.value = List<Map<String, dynamic>>.from(_hostelRows);
       _save();
-      _log('[HOSTEL MANAGER] Cleared ${before - _hostelRows.length} incomplete entries for refresh.');
+      _log(
+        '[HOSTEL MANAGER] Cleared ${before - _hostelRows.length} incomplete entries for refresh.',
+      );
     }
   }
 
@@ -281,11 +306,23 @@ class HostelManager {
     final incomingDocId = fields['_docId']?.toString() ?? '';
     final incomingId = fields['id']?.toString() ?? '';
 
+    // Only fetch for that day itself (today) — skip entries from earlier days
+    // Also skip entries where createdAt is missing/unparseable (can't confirm today)
+    final createdDt = extractCreatedAt(fields);
+    if (createdDt == null || !isSameCalendarDayAsToday(createdDt)) {
+      _log(
+        '[HOSTEL MANAGER] ⏭ Refresh skip: id=$incomingId created=${createdDt?.toIso8601String() ?? "UNKNOWN"} is not from today',
+      );
+      return false;
+    }
+
     // Check for duplicate by _docId
     if (incomingDocId.isNotEmpty) {
       for (final row in _hostelRows) {
         if (row['_docId']?.toString() == incomingDocId) {
-          _log('[HOSTEL MANAGER] ⏭ Refresh skip: _docId $incomingDocId already on screen');
+          _log(
+            '[HOSTEL MANAGER] ⏭ Refresh skip: _docId $incomingDocId already on screen',
+          );
           return false;
         }
       }
@@ -298,22 +335,31 @@ class HostelManager {
         final intime = (row['intime']?.toString() ?? '').trim();
         // Hostel: incomplete = intime empty (outtime is filled first)
         if (rowId == incomingId && intime.isEmpty) {
-          _log('[HOSTEL MANAGER] ⏭ Refresh skip: id $incomingId already has incomplete row');
+          _log(
+            '[HOSTEL MANAGER] ⏭ Refresh skip: id $incomingId already has incomplete row',
+          );
           return false;
         }
       }
     }
 
-    // Add new row with outtime set, intime empty (hostel: out first, in second)
+    // Use document creation time (createdAt / timestamp) for outtime (leaving time)
+    String displayOutTime;
+    displayOutTime = shortTimeOnly(createdDt);
+
+    // Add new row with outtime from createdAt, intime empty (hostel: out first, in second)
+    // Mark as session-only — won't persist across app restarts.
     final normalized = Map<String, dynamic>.from(fields);
-    normalized['outtime'] = normalized['outtime'] ?? shortTimeOnly(DateTime.now());
+    normalized['outtime'] = displayOutTime;
     normalized['intime'] = null;
     normalized['security'] = SecurityNameService().name;
+    normalized['_source'] = 'db_refresh';  // session-only marker
     _hostelRows.add(normalized);
     notifier.value = List<Map<String, dynamic>>.from(_hostelRows);
     _save();
-    _log('[HOSTEL MANAGER] ✓ Refresh added: id=$incomingId, docId=$incomingDocId');
+    _log(
+      '[HOSTEL MANAGER] ✓ Refresh added (session-only): id=$incomingId, docId=$incomingDocId, outtime=$displayOutTime',
+    );
     return true;
   }
 }
-

@@ -49,9 +49,14 @@ class DayScholarManager {
           : DateTime.now();
 
       final lastScan = _lastScanTime[scanKey];
-      if (lastScan != null && scanMoment.difference(lastScan).abs() < _scanCooldown) {
-        _log('[DAY SCHOLAR MANAGER] ⚠ COOLDOWN: Ignoring duplicate scan for $scanKey (within 10s)');
-        logCallback?.call('DayScholar: duplicate scan ignored for $scanKey (10s cooldown)');
+      if (lastScan != null &&
+          scanMoment.difference(lastScan).abs() < _scanCooldown) {
+        _log(
+          '[DAY SCHOLAR MANAGER] ⚠ COOLDOWN: Ignoring duplicate scan for $scanKey (within 10s)',
+        );
+        logCallback?.call(
+          'DayScholar: duplicate scan ignored for $scanKey (10s cooldown)',
+        );
         return;
       }
       _lastScanTime[scanKey] = scanMoment;
@@ -73,14 +78,17 @@ class DayScholarManager {
       // Check if this scan is from a DIFFERENT gate pass (different _docId)
       final existingDocId = r['_docId']?.toString() ?? '';
       final incomingDocId = fields['_docId']?.toString() ?? '';
-      final isDifferentGatePass = existingDocId.isNotEmpty &&
+      final isDifferentGatePass =
+          existingDocId.isNotEmpty &&
           incomingDocId.isNotEmpty &&
           existingDocId != incomingDocId;
 
       if (isDifferentGatePass && prevOut.trim().isEmpty) {
         // Different gate pass for same student, and old one wasn't completed
         // → DON'T fill outtime on old row. Create a NEW row for the new gate pass.
-        _log('[DAY SCHOLAR MANAGER] Different docId ($incomingDocId vs $existingDocId) — creating new row');
+        _log(
+          '[DAY SCHOLAR MANAGER] Different docId ($incomingDocId vs $existingDocId) — creating new row',
+        );
         final newRow = Map<String, dynamic>.from(fields);
         newRow['intime'] = now;
         newRow['outtime'] = null;
@@ -99,6 +107,8 @@ class DayScholarManager {
         if (prevIn.trim().isEmpty) {
           // first event -> set intime
           r['intime'] = now;
+          // Promote from session-only to persistent
+          r.remove('_source');
           final loc = fields['location'];
           if (loc != null && loc.toString().trim().isNotEmpty) {
             r['location'] = loc;
@@ -189,19 +199,23 @@ class DayScholarManager {
     logCallback?.call(message);
   }
 
-  /// Save current rows to local storage
+  /// Save current rows to local storage.
+  /// DB-refresh entries (_source == 'db_refresh') are excluded — session-only.
   void _save() {
-    LocalStorageService().save('day_scholar', _dayRows);
+    final persistable = _dayRows
+        .where((row) => row['_source'] != 'db_refresh')
+        .toList();
+    LocalStorageService().save('day_scholar', persistable);
   }
 
-  /// Load previously saved rows from local storage (daily reset applied)
   Future<void> loadFromStorage() async {
     final saved = await LocalStorageService().load('day_scholar');
     if (saved.isNotEmpty) {
       _dayRows.clear();
-      _dayRows.addAll(saved);
+      // Filter out any DB-refresh entries that somehow got persisted
+      _dayRows.addAll(saved.where((row) => row['_source'] != 'db_refresh'));
       notifier.value = List<Map<String, dynamic>>.from(_dayRows);
-      _log('[DAY SCHOLAR MANAGER] Loaded ${saved.length} rows from storage');
+      _log('[DAY SCHOLAR MANAGER] Loaded ${_dayRows.length} rows from storage (filtered DB-refresh entries)');
     }
   }
 
@@ -222,7 +236,9 @@ class DayScholarManager {
       return;
     }
     final r = _dayRows[rowIndex];
-    _log('[DAY SCHOLAR MANAGER] Manual time entry: row=$rowIndex, field=$field, time=$formattedTime');
+    _log(
+      '[DAY SCHOLAR MANAGER] Manual time entry: row=$rowIndex, field=$field, time=$formattedTime',
+    );
 
     r[field] = formattedTime;
     _dayRows[rowIndex] = Map<String, dynamic>.from(r);
@@ -237,7 +253,9 @@ class DayScholarManager {
     if (intime.isNotEmpty && outtime.isNotEmpty) {
       final docId = r['_docId']?.toString();
       if (docId != null && docId.isNotEmpty) {
-        _log('[DAY SCHOLAR MANAGER] ✓ Both times filled after manual entry — triggering onEntryComplete');
+        _log(
+          '[DAY SCHOLAR MANAGER] ✓ Both times filled after manual entry — triggering onEntryComplete',
+        );
         onEntryComplete?.call(docId);
       }
     }
@@ -247,11 +265,15 @@ class DayScholarManager {
   /// Used during database refresh to replace local state with database state.
   void clearIncomplete() {
     final before = _dayRows.length;
-    _dayRows.removeWhere((row) => (row['outtime']?.toString() ?? '').trim().isEmpty);
+    _dayRows.removeWhere(
+      (row) => (row['outtime']?.toString() ?? '').trim().isEmpty,
+    );
     if (_dayRows.length != before) {
       notifier.value = List<Map<String, dynamic>>.from(_dayRows);
       _save();
-      _log('[DAY SCHOLAR MANAGER] Cleared ${before - _dayRows.length} incomplete entries for refresh.');
+      _log(
+        '[DAY SCHOLAR MANAGER] Cleared ${before - _dayRows.length} incomplete entries for refresh.',
+      );
     }
   }
 
@@ -263,11 +285,23 @@ class DayScholarManager {
     final incomingDocId = fields['_docId']?.toString() ?? '';
     final incomingId = fields['id']?.toString() ?? '';
 
+    // Only fetch for that day itself (today) — skip entries from earlier days
+    // Also skip entries where createdAt is missing/unparseable (can't confirm today)
+    final createdDt = extractCreatedAt(fields);
+    if (createdDt == null || !isSameCalendarDayAsToday(createdDt)) {
+      _log(
+        '[DAY SCHOLAR MANAGER] ⏭ Refresh skip: id=$incomingId created=${createdDt?.toIso8601String() ?? "UNKNOWN"} is not from today',
+      );
+      return false;
+    }
+
     // Check for duplicate by _docId
     if (incomingDocId.isNotEmpty) {
       for (final row in _dayRows) {
         if (row['_docId']?.toString() == incomingDocId) {
-          _log('[DAY SCHOLAR MANAGER] ⏭ Refresh skip: _docId $incomingDocId already on screen');
+          _log(
+            '[DAY SCHOLAR MANAGER] ⏭ Refresh skip: _docId $incomingDocId already on screen',
+          );
           return false;
         }
       }
@@ -279,22 +313,31 @@ class DayScholarManager {
         final rowId = row['id']?.toString() ?? '';
         final outtime = (row['outtime']?.toString() ?? '').trim();
         if (rowId == incomingId && outtime.isEmpty) {
-          _log('[DAY SCHOLAR MANAGER] ⏭ Refresh skip: id $incomingId already has incomplete row');
+          _log(
+            '[DAY SCHOLAR MANAGER] ⏭ Refresh skip: id $incomingId already has incomplete row',
+          );
           return false;
         }
       }
     }
 
-    // Add new row with intime placeholder from createdAt, outtime empty
+    // Use document creation time (createdAt / timestamp) for intime
+    String displayInTime;
+    displayInTime = shortTimeOnly(createdDt);
+
+    // Add new row with intime from createdAt, outtime empty
+    // Mark as session-only — won't persist across app restarts.
     final normalized = Map<String, dynamic>.from(fields);
-    normalized['intime'] = normalized['intime'] ?? shortTimeOnly(DateTime.now());
+    normalized['intime'] = displayInTime;
     normalized['outtime'] = null;
     normalized['security'] = SecurityNameService().name;
+    normalized['_source'] = 'db_refresh';  // session-only marker
     _dayRows.add(normalized);
     notifier.value = List<Map<String, dynamic>>.from(_dayRows);
     _save();
-    _log('[DAY SCHOLAR MANAGER] ✓ Refresh added: id=$incomingId, docId=$incomingDocId');
+    _log(
+      '[DAY SCHOLAR MANAGER] ✓ Refresh added (session-only): id=$incomingId, docId=$incomingDocId, intime=$displayInTime',
+    );
     return true;
   }
 }
-

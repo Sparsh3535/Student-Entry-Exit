@@ -14,6 +14,7 @@ import '../managers/csv_service.dart';
 import '../managers/local_storage_service.dart';
 import '../managers/security_name_service.dart';
 import '../managers/scan_queue_service.dart';
+import '../managers/leave_backup_service.dart';
 import 'day_scholar.dart';
 import 'leave_applications.dart';
 import 'hostel.dart';
@@ -1080,6 +1081,75 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
+  /// Restore leave application entries from local backup file.
+  /// Called when leave data has disappeared and needs recovery.
+  Future<void> _restoreFromLeaveBackup() async {
+    _log('[BACKUP] Starting leave backup restore...');
+
+    // Show progress dialog
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        content: const Row(
+          children: [
+            CircularProgressIndicator(),
+            SizedBox(width: 20),
+            Text('Restoring from backup...'),
+          ],
+        ),
+      ),
+    );
+
+    try {
+      final entries = await LeaveBackupService().restoreAll();
+      int restored = 0;
+
+      for (final entry in entries) {
+        // Use addOrUpdateRow to avoid duplicates — it checks by id/phone/name
+        _leaveManager.addOrUpdateRow(entry);
+        restored++;
+      }
+
+      // Dismiss progress dialog
+      if (mounted && Navigator.of(context).canPop()) {
+        Navigator.of(context).pop();
+      }
+
+      _log('[BACKUP] Restored $restored leave entries from backup');
+
+      // Show result
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              restored > 0
+                  ? '✓ Restored $restored leave entries from backup'
+                  : '⚠ No entries found in backup',
+            ),
+            backgroundColor: restored > 0 ? Colors.green : Colors.orange,
+            duration: const Duration(seconds: 4),
+          ),
+        );
+      }
+    } catch (e) {
+      // Dismiss progress dialog
+      if (mounted && Navigator.of(context).canPop()) {
+        Navigator.of(context).pop();
+      }
+      _log('[BACKUP] Error restoring from backup: $e');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('✗ Failed to restore from backup: $e'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+    }
+  }
+
   /// Fetch all entries from Firestore (gate_passes + leave_requests) and
   /// re-populate the Day Scholar, Hostel, and Leave Application tables.
   /// Only adds entries that are NOT already on screen (duplicate-safe).
@@ -1412,6 +1482,56 @@ class _HomeScreenState extends State<HomeScreen> {
                               ],
                             ),
                           ),
+                          const SizedBox(height: 20),
+                          const Text(
+                            'Backup for Leave Application',
+                            style: TextStyle(
+                              fontWeight: FontWeight.bold,
+                              fontSize: 15,
+                            ),
+                          ),
+                          const SizedBox(height: 8),
+                          Container(
+                            width: double.infinity,
+                            padding: const EdgeInsets.all(12),
+                            decoration: BoxDecoration(
+                              color: Colors.orange.shade50,
+                              borderRadius: BorderRadius.circular(8),
+                              border: Border.all(color: Colors.orange.shade200),
+                            ),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Row(
+                                  children: [
+                                    Icon(
+                                      Icons.backup_outlined,
+                                      color: Colors.orange.shade700,
+                                      size: 18,
+                                    ),
+                                    const SizedBox(width: 8),
+                                    Expanded(
+                                      child: Text(
+                                        'Restore leave entries from local backup',
+                                        style: TextStyle(
+                                          color: Colors.orange.shade800,
+                                          fontSize: 13,
+                                        ),
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                                const SizedBox(height: 6),
+                                Text(
+                                  'Leave entries are automatically backed up on first scan. If leave data disappears, use the button below to restore from the local backup file.',
+                                  style: TextStyle(
+                                    color: Colors.grey.shade600,
+                                    fontSize: 12,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
                         ],
                       ),
                     ),
@@ -1419,6 +1539,21 @@ class _HomeScreenState extends State<HomeScreen> {
                       TextButton(
                         onPressed: () => Navigator.of(ctx).pop(),
                         child: const Text('Close'),
+                      ),
+                      ElevatedButton.icon(
+                        icon: const Icon(Icons.restore, size: 16),
+                        label: const Text('Restore Leave Backup'),
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: Colors.orange.shade700,
+                          foregroundColor: Colors.white,
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(8),
+                          ),
+                        ),
+                        onPressed: () {
+                          Navigator.of(ctx).pop();
+                          _restoreFromLeaveBackup();
+                        },
                       ),
                       ElevatedButton.icon(
                         icon: const Icon(Icons.cloud_download, size: 16),

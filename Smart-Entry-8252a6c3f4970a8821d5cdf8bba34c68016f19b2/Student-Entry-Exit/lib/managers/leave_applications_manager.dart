@@ -1,6 +1,7 @@
 import 'package:flutter/foundation.dart';
 import 'data_utils.dart';
 import 'csv_service.dart';
+import 'leave_backup_service.dart';
 import 'local_storage_service.dart';
 import 'security_name_service.dart';
 
@@ -141,68 +142,118 @@ class LeaveApplicationsManager {
       final r = _leaveApps[existingIndex];
       final prevReturning = (r['returning'] as String?) ?? '';
 
-      // Update _docId from incoming data (may be missing in cached rows)
-      if (fields['_docId'] != null) {
-        r['_docId'] = fields['_docId'];
-        debugPrint('[LEAVE MANAGER] Updated _docId to: ${fields['_docId']}');
-      } else {
-        debugPrint('[LEAVE MANAGER] WARNING: incoming fields has no _docId!');
-      }
+      // ── CRITICAL: Check if this is actually a DIFFERENT leave request ──
+      // If the incoming _docId differs from the existing row's _docId,
+      // this is a brand-new leave pass — NOT the return scan for the old one.
+      // Without this check, scan #1 of a new leave wrongly fills 'returning'
+      // on the old row and immediately triggers Firebase deletion.
+      final incomingDocId = fields['_docId']?.toString() ?? '';
+      final existingDocId = r['_docId']?.toString() ?? '';
+      if (incomingDocId.isNotEmpty &&
+          existingDocId.isNotEmpty &&
+          incomingDocId != existingDocId &&
+          prevReturning.trim().isEmpty) {
+        // Different doc ID + old row still incomplete → new leave request
+        _log('[LEAVE MANAGER] ⚠ _docId mismatch: existing=$existingDocId, incoming=$incomingDocId');
+        _log('[LEAVE MANAGER] This is a NEW leave request, not a return scan. Creating new row.');
 
-      // leaving is set once on the first scan and never overwritten
-      // (the original scan time must be preserved even after extensions)
-
-      // Update returnDate from incoming data (planned return date from Firebase form)
-      final incomingReturnDate = fields['returnDate']?.toString() ?? '';
-      if (incomingReturnDate.isNotEmpty) {
-        r['returnDate'] = incomingReturnDate;
-      }
-
-      if (prevReturning.trim().isEmpty) {
-        // returning empty → fill it with the actual scan time
-        r['returning'] = now;
-        // Update address from incoming data (fresh from Firebase)
-        final addr = fields['address'];
-        if (addr != null && addr.toString().trim().isNotEmpty) {
-          r['address'] = addr;
-        }
-        // Calculate duration from leaving → returning
-        final leavingStr = (r['leaving']?.toString() ?? '').trim();
-        if (leavingStr.isNotEmpty) {
-          r['duration'] = _calculateDuration(leavingStr, now);
-        }
+        // Mark the old incomplete row as superseded (don't delete it — let
+        // clearCompleted / midnight handle it, or the user can manually fill it)
+        r['_superseded'] = true;
         _leaveApps[existingIndex] = Map<String, dynamic>.from(r);
-        logCallback?.call(
-          'Leave: set returning to $now for id=${id ?? phone ?? name}',
-        );
-        // Both filled → trigger Firebase delete
-        final docId = r['_docId']?.toString();
-        debugPrint('[LEAVE MANAGER] Entry complete. _docId=$docId, onEntryComplete=${onEntryComplete != null ? "SET" : "NULL"}');
-        if (docId != null && docId.isNotEmpty) {
-          onEntryComplete?.call(docId);
-          debugPrint('[LEAVE MANAGER] ✓ Called onEntryComplete with docId=$docId');
-        } else {
-          debugPrint('[LEAVE MANAGER] ✗ Cannot delete: _docId is null or empty');
-        }
+
+        // Fall through to "not found" path below to add a new row
       } else {
-        // both filled → start new row
-        final newRow = Map<String, dynamic>.from(r);
-        newRow['leaving'] = now;
-        newRow['returning'] = null;
-        newRow['duration'] = '';
-        newRow['receivedAt'] = now;
-        newRow['address'] = fields['address'] ?? r['address'];
-        newRow['security'] = SecurityNameService().name;
-        _leaveApps.add(newRow);
-        logCallback?.call(
-          'Leave: started new session for id=${id ?? phone ?? name}',
-        );
+        // Same doc or returning already filled → normal update logic
+
+        // Update _docId from incoming data (may be missing in cached rows)
+        if (fields['_docId'] != null) {
+          r['_docId'] = fields['_docId'];
+          debugPrint('[LEAVE MANAGER] Updated _docId to: ${fields['_docId']}');
+        } else {
+          debugPrint('[LEAVE MANAGER] WARNING: incoming fields has no _docId!');
+        }
+
+        // leaving is set once on the first scan and never overwritten
+        // (the original scan time must be preserved even after extensions)
+
+        // Update returnDate from incoming data (planned return date from Firebase form)
+        final incomingReturnDate = fields['returnDate']?.toString() ?? '';
+        if (incomingReturnDate.isNotEmpty) {
+          r['returnDate'] = incomingReturnDate;
+        }
+
+        if (prevReturning.trim().isEmpty) {
+          final prevLeaving = (r['leaving']?.toString() ?? '').trim();
+
+          if (prevLeaving.isEmpty) {
+            // ── FIRST SCAN on a refresh-added row: leaving is empty ──
+            // Set leaving to actual scan time (not the planned date)
+            r['leaving'] = now;
+            r['security'] = SecurityNameService().name;
+            // Promote from session-only to persistent: the student actually
+            // scanned, so this entry should now survive app restarts.
+            r.remove('_source');
+            // Update address from incoming data (fresh from Firebase)
+            final addr = fields['address'];
+            if (addr != null && addr.toString().trim().isNotEmpty) {
+              r['address'] = addr;
+            }
+            _leaveApps[existingIndex] = Map<String, dynamic>.from(r);
+            logCallback?.call(
+              'Leave: set leaving to $now for id=${id ?? phone ?? name}',
+            );
+            _log('[LEAVE MANAGER] ✓ First scan on refresh row — leaving set to $now');
+          } else {
+            // ── RETURN SCAN: leaving is filled, returning is empty ──
+            // returning empty → fill it with the actual scan time
+            r['returning'] = now;
+            // Update address from incoming data (fresh from Firebase)
+            final addr = fields['address'];
+            if (addr != null && addr.toString().trim().isNotEmpty) {
+              r['address'] = addr;
+            }
+            // Calculate duration from leaving → returning
+            final leavingStr = (r['leaving']?.toString() ?? '').trim();
+            if (leavingStr.isNotEmpty) {
+              r['duration'] = _calculateDuration(leavingStr, now);
+            }
+            _leaveApps[existingIndex] = Map<String, dynamic>.from(r);
+            logCallback?.call(
+              'Leave: set returning to $now for id=${id ?? phone ?? name}',
+            );
+            // Both filled → trigger Firebase delete
+            final docId = r['_docId']?.toString();
+            debugPrint('[LEAVE MANAGER] Entry complete. _docId=$docId, onEntryComplete=${onEntryComplete != null ? "SET" : "NULL"}');
+            if (docId != null && docId.isNotEmpty) {
+              onEntryComplete?.call(docId);
+              debugPrint('[LEAVE MANAGER] ✓ Called onEntryComplete with docId=$docId');
+              // Remove from local backup — entry is now complete and deleted from Firebase
+              LeaveBackupService().removeEntry(docId);
+            } else {
+              debugPrint('[LEAVE MANAGER] ✗ Cannot delete: _docId is null or empty');
+            }
+          }
+        } else {
+          // both filled → start new row
+          final newRow = Map<String, dynamic>.from(r);
+          newRow['leaving'] = now;
+          newRow['returning'] = null;
+          newRow['duration'] = '';
+          newRow['receivedAt'] = now;
+          newRow['address'] = fields['address'] ?? r['address'];
+          newRow['security'] = SecurityNameService().name;
+          _leaveApps.add(newRow);
+          logCallback?.call(
+            'Leave: started new session for id=${id ?? phone ?? name}',
+          );
+        }
+        _log('[LEAVE MANAGER] Updates done, setting notifier...');
+        notifier.value = List<Map<String, dynamic>>.from(_leaveApps);
+        _save();
+        _log('[LEAVE MANAGER] ✓ Notifier updated with ${notifier.value.length} rows');
+        return;
       }
-      _log('[LEAVE MANAGER] Updates done, setting notifier...');
-      notifier.value = List<Map<String, dynamic>>.from(_leaveApps);
-      _save();
-      _log('[LEAVE MANAGER] ✓ Notifier updated with ${notifier.value.length} rows');
-      return;
     }
 
     // not found → add with leaving set to ACTUAL SCAN TIME (not now, which may be delayed)
@@ -218,6 +269,8 @@ class LeaveApplicationsManager {
     logCallback?.call('Leave: added new entry for id=${id ?? phone ?? name}');
     notifier.value = List<Map<String, dynamic>>.from(_leaveApps);
     _save();
+    // Backup this new entry immediately (first scan = first appearance)
+    LeaveBackupService().saveEntry(normalized);
     _log('[LEAVE MANAGER] ✓ Notifier updated with ${notifier.value.length} rows');
   }
 
@@ -264,9 +317,35 @@ class LeaveApplicationsManager {
     }
   }
 
-  /// Save current rows to local storage
+  /// Save current rows to local storage.
+  /// DB-refresh entries (_source == 'db_refresh') are excluded — they are
+  /// session-only and must not survive app restarts.  The user must
+  /// explicitly click "Refresh from DB" again to re-fetch them.
   void _save() {
-    LocalStorageService().save('leave', _leaveApps);
+    final persistable = _leaveApps
+        .where((row) => row['_source'] != 'db_refresh')
+        .toList();
+    LocalStorageService().save('leave', persistable);
+  }
+
+  /// Parse a receivedAt string (dd-MM-yyyy or yyyy-MM-dd prefix) into a
+  /// date-only DateTime for comparison. Returns null if unparseable.
+  DateTime? _parseReceivedDate(String receivedAt) {
+    if (receivedAt.length < 10) return null;
+    final prefix = receivedAt.substring(0, 10);
+    // Try yyyy-MM-dd
+    final iso = RegExp(r'^(\d{4})-(\d{2})-(\d{2})$').firstMatch(prefix);
+    if (iso != null) {
+      return DateTime.tryParse(prefix);
+    }
+    // Try dd-MM-yyyy
+    final dmy = RegExp(r'^(\d{2})-(\d{2})-(\d{4})$').firstMatch(prefix);
+    if (dmy != null) {
+      return DateTime.tryParse(
+        '${dmy.group(3)}-${dmy.group(2)}-${dmy.group(1)}',
+      );
+    }
+    return null;
   }
 
   /// Load saved leave rows with midnight reset:
@@ -281,24 +360,48 @@ class LeaveApplicationsManager {
     }
 
     final now = DateTime.now();
-    final todayStr = '${now.year}-${now.month.toString().padLeft(2, '0')}-${now.day.toString().padLeft(2, '0')}';
+    final today = DateTime(now.year, now.month, now.day);
 
     // Collect ALL old entries (filled and unfilled) for CSV export
     final toExport = <Map<String, dynamic>>[];
     final filtered = <Map<String, dynamic>>[];
 
     for (final row in saved) {
+      // Skip DB-refresh entries — they should never have been persisted,
+      // but filter as a safeguard.  Users must click "Refresh from DB" again.
+      if (row['_source'] == 'db_refresh') {
+        _log('[LEAVE MANAGER] ⏭ Skipping DB-refresh entry during load: ${row['name']}');
+        continue;
+      }
+
+      // Skip stale pre-fix entries: these came from a "Refresh from DB" click
+      // BEFORE the _source marker was added. They have security='' (no scan)
+      // and leaving=planned date (not a real scan time). Discard them so they
+      // don't clutter the screen forever.
+      final security = (row['security']?.toString() ?? '').trim();
+      final hasSource = row.containsKey('_source');
       final leaving = (row['leaving']?.toString() ?? '').trim();
       final returning = (row['returning']?.toString() ?? '').trim();
+      if (!hasSource && security.isEmpty && leaving.isNotEmpty && returning.isEmpty) {
+        // Check if the leaving value looks like a planned date (matches leavingDate)
+        final leavingDate = (row['leavingDate']?.toString() ?? '').trim();
+        if (leavingDate.isNotEmpty && leaving.contains(leavingDate)) {
+          _log('[LEAVE MANAGER] ⏭ Skipping stale pre-fix entry (planned date, no scan): ${row['name']}');
+          toExport.add(row); // export to CSV before discarding
+          continue;
+        }
+      }
+
       final isComplete = leaving.isNotEmpty && returning.isNotEmpty;
 
       final receivedAt = row['receivedAt']?.toString() ?? '';
-      final isOld = receivedAt.length >= 10 && receivedAt.substring(0, 10) != todayStr;
+      final receivedDate = _parseReceivedDate(receivedAt);
+      final isOld = receivedDate != null && receivedDate.isBefore(today);
 
       if (isOld) {
         // Old entry — always export to CSV (filled or unfilled)
         toExport.add(row);
-        _log('[LEAVE MANAGER] Exporting ${isComplete ? "completed" : "incomplete"} entry from ${receivedAt.substring(0, 10)}: ${row['name']}');
+        _log('[LEAVE MANAGER] Exporting ${isComplete ? "completed" : "incomplete"} entry from $receivedAt: ${row['name']}');
 
         if (!isComplete) {
           // Incomplete old entry — also keep on screen so it can still be filled
@@ -406,19 +509,43 @@ class LeaveApplicationsManager {
       if (docId != null && docId.isNotEmpty) {
         _log('[LEAVE MANAGER] ✓ Both times filled after manual entry — triggering onEntryComplete');
         onEntryComplete?.call(docId);
+        // Remove from local backup — entry is now complete
+        LeaveBackupService().removeEntry(docId);
       }
     }
   }
 
-  /// Clears all incomplete entries (missing returning time).
+  /// Clears incomplete entries that have NO real scan data.
   /// Used during database refresh to replace local state with database state.
+  /// Entries where a real QR scan already happened (leaving = actual scan time,
+  /// security = guard name) are PRESERVED — we must not lose real scan data.
   void clearIncomplete() {
     final before = _leaveApps.length;
-    _leaveApps.removeWhere((row) => (row['returning']?.toString() ?? '').trim().isEmpty);
+    _leaveApps.removeWhere((row) {
+      final leaving = (row['leaving']?.toString() ?? '').trim();
+      final returning = (row['returning']?.toString() ?? '').trim();
+      if (returning.isNotEmpty) return false; // complete row — keep
+
+      // If this is a db_refresh entry (no scan yet), remove it
+      if (row['_source'] == 'db_refresh') return true;
+
+      // If leaving is empty, no scan happened — safe to remove
+      if (leaving.isEmpty) return true;
+
+      // If security is empty, no real scan happened (this is a pre-fix
+      // stale entry with the planned date in leaving). Remove it.
+      final security = (row['security']?.toString() ?? '').trim();
+      if (security.isEmpty) return true;
+
+      // leaving is filled AND security is filled → a real scan happened.
+      // Keep this entry — we must not lose the actual scan time.
+      _log('[LEAVE MANAGER] ✓ Preserving entry with real scan data: ${row['name']} (leaving=$leaving)');
+      return false;
+    });
     if (_leaveApps.length != before) {
       notifier.value = List<Map<String, dynamic>>.from(_leaveApps);
       _save();
-      _log('[LEAVE MANAGER] Cleared ${before - _leaveApps.length} incomplete entries for refresh.');
+      _log('[LEAVE MANAGER] Cleared ${before - _leaveApps.length} incomplete entries for refresh (preserved entries with real scans).');
     }
   }
 
@@ -452,19 +579,22 @@ class LeaveApplicationsManager {
       }
     }
 
-    // Add new row with leaving set from normalized data, returning empty
+    // Add new row with leaving EMPTY — leaving is only set by actual QR scan.
+    // The planned leaving date stays in leavingDate/leavingTime for display only.
+    // Mark as '_source': 'db_refresh' so this entry is SESSION-ONLY and will
+    // NOT be persisted to local storage (won't survive app restarts).
     final normalized = Map<String, dynamic>.from(fields);
-    // Use 'leaving' from normalized data if available, otherwise use current time
-    normalized['leaving'] = normalized['leaving'] ??
-        (normalized['leavingDate']?.toString() ?? shortDateTimeReadable(DateTime.now()));
+    normalized['leaving'] = null;  // Don't pre-fill — set only on first scan
     normalized['returning'] = null;
     normalized['duration'] = '';
     normalized['receivedAt'] = shortDateTimeReadable(DateTime.now());
-    normalized['security'] = SecurityNameService().name;
+    normalized['security'] = '';
+    normalized['_source'] = 'db_refresh';  // session-only marker
     _leaveApps.add(normalized);
     notifier.value = List<Map<String, dynamic>>.from(_leaveApps);
+    // Note: _save() will exclude this entry because _source == 'db_refresh'
     _save();
-    _log('[LEAVE MANAGER] ✓ Refresh added: id=$incomingId, docId=$incomingDocId');
+    _log('[LEAVE MANAGER] ✓ Refresh added (session-only): id=$incomingId, docId=$incomingDocId');
     return true;
   }
 }

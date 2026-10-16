@@ -9,8 +9,11 @@ param(
 Write-Output "Running: flutter build windows --$Configuration"
 flutter build windows --$Configuration
 
-# 2) Locate build output (Flutter places native runner and files under build\windows\runner\$Configuration)
-$runnerDir = Join-Path -Path "build\windows\runner" -ChildPath $Configuration
+# 2) Locate build output (Flutter places native runner and files under build\windows\x64\runner\$Configuration or build\windows\runner\$Configuration)
+$runnerDir = Join-Path -Path "build\windows\x64\runner" -ChildPath $Configuration
+if (!(Test-Path $runnerDir)) {
+    $runnerDir = Join-Path -Path "build\windows\runner" -ChildPath $Configuration
+}
 if (!(Test-Path $runnerDir)) {
     Write-Error "Cannot find built runner at $runnerDir. Build may have failed."
     exit 1
